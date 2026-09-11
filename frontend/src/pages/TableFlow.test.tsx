@@ -30,6 +30,40 @@ describe("setup and table flow", () => {
     renderApp();
 
     expect(screen.getByLabelText("Deck count")).toHaveValue("unknown");
+    expect(screen.getByLabelText("Splitting enabled")).toBeChecked();
+    expect(screen.getByLabelText("Maximum split hands")).toHaveValue("4");
+    expect(screen.getByLabelText("Doubling enabled")).toBeChecked();
+    expect(screen.getByLabelText("Surrender")).toHaveValue("none");
+    expect(screen.getByLabelText("Dealer second card")).toHaveValue(
+      "hole_card",
+    );
+    expect(screen.getByLabelText("Dealer blackjack check")).toHaveValue(
+      "no_peek",
+    );
+  });
+
+  it("configures extended rules and keeps no-hole-card combinations valid", () => {
+    renderApp();
+
+    fireEvent.click(screen.getByLabelText("Resplit Aces"));
+    fireEvent.click(screen.getByLabelText("Hit split Aces"));
+    fireEvent.click(screen.getByLabelText("Blackjack after split"));
+    fireEvent.click(screen.getByLabelText("Double after split"));
+    fireEvent.change(screen.getByLabelText("Surrender"), {
+      target: { value: "late" },
+    });
+    fireEvent.change(screen.getByLabelText("Dealer blackjack check"), {
+      target: { value: "peek" },
+    });
+    expect(screen.getByLabelText("Dealer blackjack check")).toHaveValue("peek");
+
+    fireEvent.change(screen.getByLabelText("Dealer second card"), {
+      target: { value: "no_hole_card" },
+    });
+    expect(screen.getByLabelText("Dealer blackjack check")).toHaveValue(
+      "no_peek",
+    );
+    expect(screen.getByLabelText("Dealer blackjack check")).toBeDisabled();
   });
 
   it("starts a configured table with active and selected seats", () => {

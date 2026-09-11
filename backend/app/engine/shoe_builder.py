@@ -10,7 +10,11 @@ class StateReconstructionError(ValueError):
     pass
 
 
-def build_shoe(decks: int, known_cards: Iterable[Card]) -> Shoe:
+def build_shoe(
+    decks: int,
+    known_cards: Iterable[Card],
+    unknown_removed_count: int = 0,
+) -> Shoe:
     counts = [decks] * len(ALL_CARDS)
 
     for card in known_cards:
@@ -22,4 +26,13 @@ def build_shoe(decks: int, known_cards: Iterable[Card]) -> Shoe:
             )
         counts[index] -= 1
 
-    return Shoe(decks=decks, card_counts=tuple(counts))
+    try:
+        return Shoe(
+            decks=decks,
+            card_counts=tuple(counts),
+            unknown_removed_count=unknown_removed_count,
+        )
+    except (TypeError, ValueError) as error:
+        raise StateReconstructionError(
+            "Cannot reconstruct shoe: invalid unknown-card count"
+        ) from error

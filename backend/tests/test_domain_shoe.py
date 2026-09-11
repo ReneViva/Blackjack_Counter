@@ -41,6 +41,10 @@ def test_shoe_rejects_invalid_composition_shape_and_counts() -> None:
         Shoe(decks=1, card_counts=(-1,) + (1,) * 51)
     with pytest.raises(ValueError):
         Shoe(decks=1, card_counts=(2,) + (1,) * 51)
+    with pytest.raises(TypeError):
+        Shoe(decks=1, card_counts=(1,) * 52, unknown_removed_count=True)
+    with pytest.raises(ValueError):
+        Shoe(decks=1, card_counts=(1,) * 52, unknown_removed_count=53)
 
 
 def test_shoe_count_requires_an_exact_card() -> None:

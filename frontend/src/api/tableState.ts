@@ -35,6 +35,16 @@ export type TableStatePayload = Readonly<{
   rules: Readonly<{
     decks: number | null;
     dealer_soft_17: "hit" | "stand";
+    splitting_enabled: boolean;
+    max_split_hands: 1 | 2 | 3 | 4;
+    resplit_aces: boolean;
+    hit_split_aces: boolean;
+    blackjack_after_split: boolean;
+    doubling_enabled: boolean;
+    double_after_split: boolean;
+    surrender: "none" | "late";
+    dealer_second_card: "hole_card" | "no_hole_card";
+    dealer_blackjack_check: "peek" | "no_peek";
   }>;
   dealer: Readonly<{ cards: readonly ObservedCardPayload[] }>;
   players: readonly Readonly<{
@@ -58,6 +68,17 @@ export function toTableStatePayload(state: SessionState): TableStatePayload {
     rules: {
       decks: state.configuration.rules.decks,
       dealer_soft_17: state.configuration.rules.dealerSoft17,
+      splitting_enabled: state.configuration.rules.splittingEnabled,
+      max_split_hands: state.configuration.rules.maxSplitHands,
+      resplit_aces: state.configuration.rules.resplitAces,
+      hit_split_aces: state.configuration.rules.hitSplitAces,
+      blackjack_after_split: state.configuration.rules.blackjackAfterSplit,
+      doubling_enabled: state.configuration.rules.doublingEnabled,
+      double_after_split: state.configuration.rules.doubleAfterSplit,
+      surrender: state.configuration.rules.surrender,
+      dealer_second_card: state.configuration.rules.dealerSecondCard,
+      dealer_blackjack_check:
+        state.configuration.rules.dealerBlackjackCheck,
     },
     dealer: {
       cards: table.dealerCards.map(toObservedCardPayload),

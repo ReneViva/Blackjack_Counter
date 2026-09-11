@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { SessionConfiguration } from "../domain/game";
 import { gameReducer } from "./gameReducer";
-import { createInitialState } from "./initialState";
+import { createInitialState, DEFAULT_RULES } from "./initialState";
 import {
   selectObservedCardCount,
   selectTableState,
@@ -10,7 +10,7 @@ import {
 } from "./selectors";
 
 const configuredSession: SessionConfiguration = {
-  rules: { decks: 6, dealerSoft17: "stand" },
+  rules: { ...DEFAULT_RULES, decks: 6, dealerSoft17: "stand" },
   activeSeats: [1, 2, 3],
   userSeat: 2,
 };

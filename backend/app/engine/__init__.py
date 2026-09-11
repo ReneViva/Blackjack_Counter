@@ -1,3 +1,11 @@
+from .dealer_engine import DealerState, DealerStatus, evaluate_dealer
+from .hand_evaluator import HandValue, evaluate_hand
+from .rule_engine import (
+    ActionDecision,
+    DealerAction,
+    dealer_action,
+    player_action_decision,
+)
 from .shoe_builder import StateReconstructionError, build_shoe
 from .state_builder import (
     ReconstructedPlayerHand,
@@ -7,14 +15,65 @@ from .state_builder import (
     build_player,
     build_table_state,
 )
+from .transition_engine import (
+    DrawTarget,
+    RevealTarget,
+    TransitionError,
+    advance_dealer,
+    draw_transition,
+    player_double,
+    player_hit,
+    player_split,
+    player_stand,
+    player_surrender,
+    resolve_dealer_check,
+    resolve_outcomes,
+    reveal_unknown,
+    start_round,
+)
+from .validator import (
+    ValidationIssue,
+    ValidationResult,
+    validate_game_state,
+    validate_round_state,
+    validate_table_state,
+)
 
 __all__ = [
+    "ActionDecision",
+    "DealerAction",
+    "DealerState",
+    "DealerStatus",
+    "DrawTarget",
+    "RevealTarget",
+    "HandValue",
     "ReconstructedPlayerHand",
     "ReconstructedTableState",
     "StateReconstructionError",
+    "TransitionError",
+    "ValidationIssue",
+    "ValidationResult",
+    "advance_dealer",
     "build_hand",
     "build_observed_card",
     "build_player",
     "build_shoe",
     "build_table_state",
+    "dealer_action",
+    "draw_transition",
+    "evaluate_hand",
+    "evaluate_dealer",
+    "player_action_decision",
+    "player_double",
+    "player_hit",
+    "player_split",
+    "player_stand",
+    "player_surrender",
+    "resolve_dealer_check",
+    "resolve_outcomes",
+    "reveal_unknown",
+    "start_round",
+    "validate_game_state",
+    "validate_round_state",
+    "validate_table_state",
 ]

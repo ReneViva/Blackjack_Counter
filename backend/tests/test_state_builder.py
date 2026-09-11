@@ -41,7 +41,8 @@ def test_reconstructs_frontend_contract_into_domain_state() -> None:
     assert tuple(player.is_user for player in reconstructed.players) == (False, True)
     assert reconstructed.known_card_count == 3
     assert reconstructed.unknown_card_count == 1
-    assert reconstructed.game_state.shoe.total_cards == 101
+    assert reconstructed.game_state.shoe.total_cards == 100
+    assert reconstructed.game_state.shoe.unknown_removed_count == 1
     assert reconstructed.game_state.shoe.count(
         Card(rank=Rank.KING, suit=Suit.HEARTS)
     ) == 1
@@ -63,7 +64,9 @@ def test_unknown_observation_is_preserved_without_removing_an_exact_card() -> No
     reconstructed = build_table_state(TableStateSchema.model_validate(raw))
 
     assert reconstructed.game_state is not None
-    assert reconstructed.game_state.shoe.total_cards == 104
+    assert reconstructed.game_state.shoe.total_cards == 103
+    assert reconstructed.game_state.shoe.exact_total == 104
+    assert reconstructed.game_state.shoe.unknown_removed_count == 1
     assert reconstructed.known_card_count == 0
     assert reconstructed.unknown_card_count == 1
     assert isinstance(reconstructed.dealer_hand.cards[0], UnknownCard)

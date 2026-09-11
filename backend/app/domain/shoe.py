@@ -10,6 +10,7 @@ _CARD_INDEX = {card: index for index, card in enumerate(ALL_CARDS)}
 class Shoe:
     decks: int
     card_counts: tuple[int, ...]
+    unknown_removed_count: int = 0
 
     def __post_init__(self) -> None:
         if isinstance(self.decks, bool) or not isinstance(self.decks, int):
@@ -27,6 +28,14 @@ class Shoe:
             raise TypeError("card counts must be integers")
         if any(count < 0 or count > self.decks for count in self.card_counts):
             raise ValueError("card counts must be between zero and decks")
+        if isinstance(self.unknown_removed_count, bool) or not isinstance(
+            self.unknown_removed_count, int
+        ):
+            raise TypeError("unknown_removed_count must be an integer")
+        if not 0 <= self.unknown_removed_count <= sum(self.card_counts):
+            raise ValueError(
+                "unknown_removed_count must be between zero and exact cards"
+            )
 
     @classmethod
     def fresh(cls, decks: int) -> "Shoe":
@@ -34,6 +43,10 @@ class Shoe:
 
     @property
     def total_cards(self) -> int:
+        return sum(self.card_counts) - self.unknown_removed_count
+
+    @property
+    def exact_total(self) -> int:
         return sum(self.card_counts)
 
     @property
