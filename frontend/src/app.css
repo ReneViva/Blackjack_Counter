@@ -388,6 +388,50 @@ select:focus-visible {
   font-weight: 800;
 }
 
+.analysis-note,
+.analysis-result > p {
+  color: #b8c9c0;
+}
+
+.analysis-error {
+  margin: 1rem 0 0;
+  border-left: 0.25rem solid #ff806f;
+  padding: 0.75rem 1rem;
+  color: #ffe2de;
+  background: rgb(255 128 111 / 10%);
+}
+
+.analysis-result {
+  margin-top: 1.25rem;
+}
+
+.outcome-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.outcome-grid div {
+  padding: 1rem;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 0.75rem;
+  background: rgb(255 255 255 / 5%);
+}
+
+.outcome-grid dt {
+  color: #9eb2a7;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.outcome-grid dd {
+  margin: 0.35rem 0 0;
+  font-size: 1.6rem;
+  font-weight: 800;
+}
+
 @media (max-width: 760px) {
   .app-header,
   .section-heading {
@@ -397,7 +441,8 @@ select:focus-visible {
 
   .control-grid,
   .control-grid--cards,
-  .shoe-status {
+  .shoe-status,
+  .outcome-grid {
     grid-template-columns: 1fr;
   }
 

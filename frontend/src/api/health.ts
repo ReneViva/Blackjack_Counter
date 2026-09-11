@@ -1,14 +1,9 @@
+import { getApiBaseUrl } from "./client";
+
 export type HealthResponse = {
   status: "ok";
   service: "blackjack-analysis-api";
 };
-
-const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000/api";
-
-function getApiBaseUrl(): string {
-  const configuredUrl = import.meta.env.VITE_API_BASE_URL?.trim();
-  return (configuredUrl || DEFAULT_API_BASE_URL).replace(/\/$/, "");
-}
 
 function isHealthResponse(value: unknown): value is HealthResponse {
   if (typeof value !== "object" || value === null) {

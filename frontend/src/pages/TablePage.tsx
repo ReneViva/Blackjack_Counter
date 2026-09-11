@@ -1,6 +1,7 @@
 import type { Dispatch } from "react";
 
 import CardPicker from "../components/cards/CardPicker";
+import AnalysisPanel from "../components/analysis/AnalysisPanel";
 import BlackjackTable from "../components/table/BlackjackTable";
 import EventHistory from "../components/table/EventHistory";
 import ShoeStatus from "../components/table/ShoeStatus";
@@ -35,6 +36,8 @@ export default function TablePage({ dispatch, state }: TablePageProps) {
           dispatch({ type: "DEAL_UNKNOWN_CARD", target })
         }
       />
+
+      <AnalysisPanel state={state} />
 
       <div className="button-row session-actions" aria-label="Session actions">
         <button
