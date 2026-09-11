@@ -2080,3 +2080,98 @@ The most important rule for ChatGPT is:
 This workflow is intended to prevent the most common agentic-development failure:
 
 > fixing one thing while silently breaking another.
+
+---
+
+# 82. Authoritative Phase 6-10 Completion Contract
+
+Phases 6-10 are complete only when the implementation satisfies the detailed
+gameplay-state contract in `TECHNICAL.md` section 156. That contract is
+authoritative for this phase sequence and resolves the previously unspecified
+game-phase and transition behavior.
+
+## Runtime State Gate
+
+Keep the immutable structural `GameState`. Add an immutable runtime `RoundState`
+containing ordered player-hand metadata, one of `DEALER_CHECK`, `PLAYER_TURNS`,
+`DEALER_TURN`, or `ROUND_COMPLETE`, an optional active hand index, and one of
+`NOT_REQUIRED`, `PENDING`, `NO_BLACKJACK`, or `BLACKJACK` for dealer check state.
+
+Runtime player hands carry seat, immutable hand, status, split depth,
+split-Ace origin, decision count, and doubled state. Player status is one of
+`ACTIVE`, `STOOD`, `BUST`, `BLACKJACK`, or `SURRENDERED`.
+
+## Rules Gate
+
+Preserve deck count and H17/S17 behavior. Support and strictly validate the
+documented defaults for splitting, maximum split hands, resplit Aces, hitting
+split Aces, blackjack after split, doubling, double after split, late surrender,
+dealer second-card style, and dealer blackjack checking. Reject
+`NO_HOLE_CARD + PEEK`. Existing payloads that omit new fields must remain valid
+through defaults.
+
+## Shoe and Reveal Gate
+
+Track latent physical removals with immutable `Shoe.unknown_removed_count`.
+Known removals decrement exact composition; unknown removals increment only the
+latent count. Physical cards remaining equal exact-count sum minus latent
+removals. Revealing an unknown decrements both the supplied exact count and the
+latent count, preserving physical total. Never infer or distribute hidden-card
+identities.
+
+## Hand and Action Gate
+
+Retain dynamic-Ace, hard/soft, bust, exact-rank pair, ordinary-21, blackjack,
+and unknown/indeterminate evaluation. Apply the configured
+`blackjack_after_split` rule through explicit split context.
+
+During `PLAYER_TURNS`, implement deterministic `HIT`, `STAND`, `SPLIT`,
+`DOUBLE`, and `SURRENDER` transitions exactly as specified in `TECHNICAL.md`.
+All dealt cards are explicit observations; no transition draws randomly.
+Splits use exact rank equality, require two explicit child draws, preserve
+same-seat ordering and limits, and enforce the split-Ace rules. Double consumes
+one card and terminates without monetary semantics. Only late surrender is
+supported.
+
+Advance to the next active hand after terminal player actions. When none
+remains, complete immediately if all hands busted or surrendered; otherwise
+enter dealer play.
+
+## Dealer and Outcome Gate
+
+Gate eligible hole-card peek scenarios in `DEALER_CHECK`; resolution records
+`NO_BLACKJACK` or `BLACKJACK` without revealing a hidden identity. During
+`DEALER_TURN`, preserve H17/S17 dealer policy, require an explicit card only for
+`HIT_REQUIRED`, complete on stand/blackjack/bust, and block indeterminate play
+until reveal.
+
+At `ROUND_COMPLETE`, derive `WIN`, `PUSH`, or `LOSS` for determinate hands using
+the documented surrender, bust, blackjack, dealer-bust, and total-comparison
+precedence. Leave indeterminate outcomes as `None`; do not calculate payouts or
+expected value.
+
+## Validation and Test Gate
+
+Phase 6 must validate phase/index/status consistency, pending-check gating,
+runtime seat and per-seat hand limits, structural state/rule compatibility,
+exact and physical shoe counts, latent-count bounds, and dealer-check
+configuration. Transition failures use stable structured codes rather than
+arbitrary exception messages.
+
+Completion requires focused tests for:
+
+- strict rule defaults and invalid combinations;
+- known, unknown, and reveal shoe bookkeeping;
+- all four phases and dealer-check resolution;
+- hit, stand, split, double, and late surrender legality and transitions;
+- split ordering, same-seat limits, split-Ace behavior, and split blackjack;
+- deterministic dealer advancement and unknown reveal;
+- outcome resolution, indeterminate values, immutability, and repeatability;
+- accessible frontend controls and transport serialization for every new rule.
+
+Run the full backend and frontend regression suites, typecheck, build, package
+integrity, compile/import/API smoke checks, and localhost integration checks.
+Phase 11 probability work is a separate gate and must not begin as part of this
+contract. In particular, `unknown_removed_count` is bookkeeping only and must
+not drive probability, marginalization, recursion, simulation, EV, or counting
+logic.

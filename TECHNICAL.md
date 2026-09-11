@@ -5208,3 +5208,219 @@ Exact probability + Monte Carlo + research analysis
 ```
 
 This keeps the project simple enough to complete and demonstrate while still giving the Python backend enough structure for mathematically rigorous game analysis.
+
+---
+
+# 156. Authoritative Phase 6-10 Gameplay State Contract
+
+This section is the authoritative technical contract for the Phase 6-10
+validation, hand, rule, dealer, and transition engines. It supplements the
+earlier architectural descriptions without changing the mathematical boundary:
+all transitions consume explicit observations, are deterministic, and perform
+no probability calculation or hidden-card inference.
+
+## 156.1 Structural State and Runtime Round State
+
+The immutable Phase 2 `GameState` remains the structural mathematical table
+state. Runtime gameplay metadata is held separately in an immutable
+`RoundState`, which references the current `GameState` and contains:
+
+- an ordered tuple of immutable `PlayerHandState` values;
+- a `RoundPhase`;
+- the active runtime hand index, or `None`;
+- a `DealerCheckResult`.
+
+`RoundPhase` has exactly `DEALER_CHECK`, `PLAYER_TURNS`, `DEALER_TURN`, and
+`ROUND_COMPLETE`. `PlayerAction` has exactly `HIT`, `STAND`, `SPLIT`, `DOUBLE`,
+and `SURRENDER`. `HandStatus` has exactly `ACTIVE`, `STOOD`, `BUST`,
+`BLACKJACK`, and `SURRENDERED`.
+
+Each `PlayerHandState` preserves the seat identifier, immutable `Hand`, status,
+split depth, whether it originated from split Aces, decision count, and whether
+double was used. These types must not duplicate mutable sources of truth.
+
+## 156.2 Dealer Blackjack Check
+
+`DealerCheckResult` has exactly `NOT_REQUIRED`, `PENDING`, `NO_BLACKJACK`, and
+`BLACKJACK`. A check begins as `PENDING` in `DEALER_CHECK` only when all of the
+following hold:
+
+1. the rules use a hole card and enable `PEEK`;
+2. the dealer has an observed second physical card;
+3. the known upcard is an Ace or ten-value rank; and
+4. the second card is not already known enough to resolve blackjack.
+
+Otherwise the result is `NOT_REQUIRED` and play begins in `PLAYER_TURNS`.
+Resolving a pending check with `NO_BLACKJACK` enters `PLAYER_TURNS`; resolving
+it with `BLACKJACK` enters `ROUND_COMPLETE`. The check records observed
+information and never fabricates or reveals the hole-card identity.
+
+## 156.3 Rules
+
+`Rules` remains immutable and retains `deck_count` and `dealer_soft_17`. It adds:
+
+| Field | Type | Default | Constraint |
+|---|---|---:|---|
+| `splitting_enabled` | strict boolean | `true` | If enabled, `max_split_hands >= 2` |
+| `max_split_hands` | strict integer | `4` | 1 through 4; maximum hands per original seat |
+| `resplit_aces` | strict boolean | `false` | Applies to a split-Ace hand |
+| `hit_split_aces` | strict boolean | `false` | Controls play after each required split-Ace draw |
+| `blackjack_after_split` | strict boolean | `false` | Controls whether a qualifying split two-card 21 is blackjack |
+| `doubling_enabled` | strict boolean | `true` | No monetary meaning |
+| `double_after_split` | strict boolean | `true` | Controls double on split hands |
+| `surrender` | `SurrenderRule` | `NONE` | `NONE` or `LATE` |
+| `dealer_second_card` | `DealerSecondCardRule` | `HOLE_CARD` | `HOLE_CARD` or `NO_HOLE_CARD` |
+| `dealer_blackjack_check` | `DealerBlackjackCheckRule` | `NO_PEEK` | `PEEK` or `NO_PEEK` |
+
+`deck_count` remains 1 through 8. `NO_HOLE_CARD + PEEK` is invalid. Enums are
+strict, and booleans must not be accepted as integers. Transport payloads that
+omit the new fields receive these defaults.
+
+## 156.4 Latent Unknown-Card Bookkeeping
+
+`Shoe` adds immutable `unknown_removed_count`, defaulting to zero, with:
+
+```text
+0 <= unknown_removed_count <= sum(exact_counts)
+physical_total = sum(exact_counts) - unknown_removed_count
+```
+
+Exact counts describe the remaining composition before identities are assigned
+to latent removals. Removing a known card decrements its exact count once and
+does not change the latent count. Removing an `UnknownCard` leaves exact counts
+unchanged and increments the latent count once.
+
+Revealing a previously removed unknown replaces that `UnknownCard` at its
+location, decrements the supplied exact card count once, and decrements the
+latent count once. Physical total is therefore unchanged. Reveal is rejected
+when the location is not unknown, the latent count is zero, or the exact card is
+unavailable. Other unknown identities are never inferred or redistributed.
+
+## 156.5 Hand Evaluation and Split Context
+
+The evaluator preserves dynamic Ace handling, hard/soft totals, bust, exact-rank
+pair detection, ordinary 21, blackjack, and indeterminate results for hands that
+contain `UnknownCard`. A split-origin two-card Ace plus ten-value card is
+ordinary 21 when `blackjack_after_split` is false and may be blackjack only when
+that rule is true. Split context is passed explicitly; it does not globally
+change ordinary hand evaluation.
+
+## 156.6 Player Action Lifecycle
+
+Player actions require `PLAYER_TURNS`, the current active hand, `ACTIVE` status,
+and a determinate hand. An indeterminate player hand produces a structured
+`hand_indeterminate` failure.
+
+- `HIT` consumes one explicit `ObservedCard`, applies known or latent shoe
+  bookkeeping, appends it, and increments `decision_count`. Bust becomes
+  `BUST`; terminal 21 becomes `STOOD` unless explicitly qualifying as
+  `BLACKJACK`; otherwise the hand stays `ACTIVE`.
+- `STAND` consumes no card, sets `STOOD`, and increments `decision_count`.
+- `DOUBLE` requires the rule to be enabled, exactly two cards, no previous
+  decision, a nonterminal hand, and `double_after_split` for split hands. It
+  consumes exactly one explicit card, sets `doubled`, increments the decision
+  count once, and immediately ends as `BUST`, permitted `BLACKJACK`, or
+  `STOOD`. It has no currency, stake, or wager semantics.
+- `SURRENDER` requires `LATE`, an original unsplit two-card hand on its first
+  decision, and a dealer check result of `NOT_REQUIRED` or `NO_BLACKJACK`. It
+  consumes no card and sets `SURRENDERED`. Early surrender is not supported.
+
+Whenever an action makes a hand terminal, the next later `ACTIVE` hand becomes
+active. If none remains, all `BUST`/`SURRENDERED` hands cause
+`ROUND_COMPLETE`; otherwise play enters `DEALER_TURN`. The active index is then
+`None`.
+
+## 156.7 Split Semantics
+
+Splitting requires an enabled rule, an active determinate two-card hand of two
+known cards with exactly equal `Rank`, no previous decision, and fewer than
+`max_split_hands` hands for that seat. Equal blackjack values do not form a
+pair: `10 + K` is not splittable. Resplitting Aces additionally requires
+`resplit_aces`.
+
+The transition consumes explicit `left_draw` and `right_draw` observations and
+replaces `[A, B]` in place with `[A, left_draw]` then `[B, right_draw]`. Both
+children retain the seat, increment split depth, reset decision count, and have
+`doubled = false`. Known draws decrement exact counts; unknown draws increment
+the latent count.
+
+Children of split Aces have `from_split_aces = true`. If `hit_split_aces` is
+false, each is terminal after its required draw, except that another Ace pair
+may remain `ACTIVE` solely to resplit when `resplit_aces` is enabled and the
+seat remains below its hand limit. If `hit_split_aces` is true, normal actions
+apply. A qualifying split Ace plus ten-value card is `STOOD` unless
+`blackjack_after_split` permits `BLACKJACK`.
+
+## 156.8 Dealer Turn
+
+Dealer policy is deterministic: below 17 is `HIT_REQUIRED`; hard 17 stands;
+soft 17 follows H17/S17; above 17 stands; blackjack and bust are terminal; an
+unknown hand is `INDETERMINATE`.
+
+In `DEALER_TURN`, `HIT_REQUIRED` consumes exactly one explicit observed card and
+re-evaluates. `STAND`, `BLACKJACK`, or `BUST` accepts no card and advances to
+`ROUND_COMPLETE`. `INDETERMINATE` rejects progression until the unknown
+observation is revealed. Under `NO_HOLE_CARD`, any later dealer card is likewise
+an explicit observed draw.
+
+## 156.9 Reveal and Dealer-Check Consistency
+
+The reveal transition supports the dealer hand and any runtime player hand. It
+verifies the target index contains `UnknownCard`, a latent removal exists, and
+the supplied exact card is available, then performs the bookkeeping in section
+156.4. If `dealer_check_result` is `NO_BLACKJACK`, a dealer reveal that would
+make the upcard plus revealed hole card blackjack is rejected as contradictory.
+
+## 156.10 Outcomes
+
+Outcomes are derived only in `ROUND_COMPLETE`, using `WIN`, `PUSH`, and `LOSS`:
+
+- surrendered and busted player hands lose;
+- player and dealer blackjack push;
+- player blackjack beats a non-blackjack dealer;
+- dealer blackjack beats a non-blackjack player;
+- dealer bust loses to every surviving player hand;
+- otherwise determinate totals are compared normally.
+
+If a required value is indeterminate, the outcome is `None`. No payout or
+expected value is calculated.
+
+## 156.11 Round Validation and Stable Errors
+
+Validation enforces all structural `GameState`, rule, shoe, seat, multiplicity,
+and latent-count invariants plus these phase invariants:
+
+- `DEALER_CHECK`: no active hand index and check result `PENDING`;
+- `PLAYER_TURNS`: an in-range active index referencing an `ACTIVE` hand and no
+  pending dealer check;
+- `DEALER_TURN`: no active index and no `ACTIVE` player hand;
+- `ROUND_COMPLETE`: no active index and no `ACTIVE` player hand.
+
+Runtime seat IDs remain valid, per-seat hand counts do not exceed the configured
+maximum, metadata aligns with hands, exact and physical counts never become
+negative, and dealer-check configuration remains consistent.
+
+Transition failures use concise stable codes, including `wrong_phase`,
+`inactive_hand`, `terminal_hand`, `hand_indeterminate`, `action_not_allowed`,
+`split_not_allowed`, `split_limit_reached`, `resplit_aces_not_allowed`,
+`double_not_allowed`, `surrender_not_allowed`, `dealer_check_pending`,
+`dealer_check_not_pending`, `invalid_dealer_check_result`,
+`reveal_target_not_unknown`, `reveal_conflicts_with_dealer_check`, and
+`unknown_removal_unavailable`. Arbitrary exception text is not a domain or API
+contract.
+
+## 156.12 Frontend and Transport Boundary
+
+The setup UI exposes every rule in section 156.3 with accessible controls and
+serializes them through the existing transport boundary. It contains no wager,
+bet, or bankroll field. Pydantic transport performs strict enum, boolean, and
+integer validation before reconstruction into immutable plain-Python domain
+types:
+
+```text
+Pydantic transport -> reconstruction -> domain -> validation/engine
+```
+
+No gameplay transition HTTP API is introduced by this contract. Phase 10
+transition behavior remains an engine-level interface until a later authorized
+API contract exists.
