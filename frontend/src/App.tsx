@@ -1,11 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import { getHealth } from "./api/health";
+import SetupPage from "./pages/SetupPage";
+import TablePage from "./pages/TablePage";
+import { gameReducer } from "./state/gameReducer";
+import { createInitialState } from "./state/initialState";
 import "./app.css";
 
 type ConnectionState = "loading" | "connected" | "unavailable";
 
 export default function App() {
+  const [session, dispatch] = useReducer(
+    gameReducer,
+    undefined,
+    createInitialState,
+  );
   const [connectionState, setConnectionState] =
     useState<ConnectionState>("loading");
   const requestController = useRef<AbortController | null>(null);
@@ -31,16 +40,17 @@ export default function App() {
     return () => requestController.current?.abort();
   }, [checkConnection]);
 
+  const sessionStarted = session.events.some(
+    (event) => event.type === "NEW_SHOE",
+  );
+
   return (
     <main className="app-shell">
-      <section className="status-card" aria-labelledby="app-title">
-        <p className="eyebrow">Educational simulation</p>
-        <h1 id="app-title">Blackjack Probability Lab</h1>
-        <p className="summary">
-          The project foundation is ready for future, Python-powered blackjack
-          analysis.
-        </p>
-
+      <header className="app-header">
+        <div>
+          <p className="eyebrow">Educational simulation</p>
+          <h1 id="app-title">Blackjack Probability Lab</h1>
+        </div>
         <div className={`connection connection--${connectionState}`} role="status">
           <span className="connection__indicator" aria-hidden="true" />
           <div>
@@ -51,14 +61,25 @@ export default function App() {
               {connectionState === "unavailable" && "Backend unavailable"}
             </p>
           </div>
+          {connectionState === "unavailable" && (
+            <button type="button" onClick={checkConnection}>
+              Retry connection
+            </button>
+          )}
         </div>
+      </header>
 
-        {connectionState === "unavailable" && (
-          <button type="button" onClick={checkConnection}>
-            Retry connection
-          </button>
-        )}
-      </section>
+      {sessionStarted ? (
+        <TablePage state={session} dispatch={dispatch} />
+      ) : (
+        <SetupPage
+          configuration={session.configuration}
+          onChange={(configuration) =>
+            dispatch({ type: "CONFIGURE_SESSION", configuration })
+          }
+          onStart={() => dispatch({ type: "NEW_SHOE" })}
+        />
+      )}
     </main>
   );
 }

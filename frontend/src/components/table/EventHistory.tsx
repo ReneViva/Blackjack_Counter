@@ -1,0 +1,49 @@
+import type { GameEvent } from "../../domain/events";
+
+type EventHistoryProps = Readonly<{
+  events: readonly GameEvent[];
+}>;
+
+function describeEvent(event: GameEvent): string {
+  switch (event.type) {
+    case "NEW_SHOE":
+      return "New shoe started";
+    case "DEAL_KNOWN_CARD": {
+      const target =
+        event.target.kind === "dealer"
+          ? "Dealer"
+          : `Player seat ${event.target.seat}`;
+      return `${target} observed ${event.card.rank} of ${event.card.suit}`;
+    }
+    case "DEAL_UNKNOWN_CARD":
+      return event.target.kind === "dealer"
+        ? "Dealer observed an unknown card"
+        : `Player seat ${event.target.seat} observed an unknown card`;
+    case "ROUND_COMPLETE":
+      return "Round marked complete";
+    case "SHUFFLE":
+      return "Shoe shuffled";
+  }
+}
+
+export default function EventHistory({ events }: EventHistoryProps) {
+  return (
+    <section className="panel event-history" aria-labelledby="history-title">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">Chronology</p>
+          <h2 id="history-title">Event history</h2>
+        </div>
+        <span>{events.length} events</span>
+      </div>
+      <ol>
+        {events.map((event) => (
+          <li key={event.id}>
+            <span>{event.sequence}</span>
+            {describeEvent(event)}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}

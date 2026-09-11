@@ -4,6 +4,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from app.api import validation_router
+
 
 VITE_DEVELOPMENT_ORIGINS = (
     "http://127.0.0.1:5173",
@@ -24,9 +26,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=list(VITE_DEVELOPMENT_ORIGINS),
     allow_credentials=False,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["Accept", "Content-Type"],
 )
+app.include_router(validation_router)
 
 
 @app.get("/api/health", response_model=HealthResponse)
