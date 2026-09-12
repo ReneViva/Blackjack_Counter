@@ -3,7 +3,12 @@ from .comparison import (
     compare_table_research,
     table_observations,
 )
-from .count_engine import AceInformationResult, ResearchScore, score_observations
+from .count_engine import (
+    AceInformationResult,
+    ResearchScore,
+    score_known_ranks,
+    score_observations,
+)
 from .definitions import (
     ACE_INFORMATION,
     APPROVED_PRIMARY_DEFINITIONS,
@@ -22,6 +27,27 @@ from .definitions import (
     UnknownResearchDefinitionError,
     get_primary_definition,
 )
+from .experiments import (
+    EXPERIMENT_VERSION,
+    MAX_CASE_COUNT,
+    MAX_REMOVED_CARDS_PER_CASE,
+    BatchExperiment,
+    ExactReferenceResult,
+    ExperimentCase,
+    ExperimentValidationError,
+    generate_batch_experiment,
+    remaining_rank_counts,
+    sample_removed_ranks,
+    shoe_after_rank_removals,
+)
+from .metrics import (
+    OUTCOME_BALANCE_METRIC,
+    PEARSON_FORMULA,
+    WIN_PROBABILITY_METRIC,
+    PearsonMetric,
+    compute_experiment_metrics,
+    pearson_correlation,
+)
 
 __all__ = [
     "ACE_INFORMATION",
@@ -29,7 +55,17 @@ __all__ = [
     "AceAuxiliaryDefinition",
     "AceClassification",
     "AceInformationResult",
+    "BatchExperiment",
+    "EXPERIMENT_VERSION",
+    "ExactReferenceResult",
+    "ExperimentCase",
+    "ExperimentValidationError",
+    "MAX_CASE_COUNT",
+    "MAX_REMOVED_CARDS_PER_CASE",
     "OMEGA_II",
+    "OUTCOME_BALANCE_METRIC",
+    "PEARSON_FORMULA",
+    "PearsonMetric",
     "PublishedResearchMetrics",
     "ResearchComparison",
     "ResearchDefinition",
@@ -41,9 +77,17 @@ __all__ = [
     "SourceReference",
     "UnknownResearchDefinitionError",
     "WONG_HALVES",
+    "WIN_PROBABILITY_METRIC",
     "ZEN_COUNT",
+    "compute_experiment_metrics",
     "compare_table_research",
+    "generate_batch_experiment",
     "get_primary_definition",
+    "pearson_correlation",
+    "remaining_rank_counts",
+    "sample_removed_ranks",
+    "score_known_ranks",
     "score_observations",
+    "shoe_after_rank_removals",
     "table_observations",
 ]

@@ -1,8 +1,15 @@
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    field_validator,
+)
 
-from app.domain import DealerCheckResult
+from app.domain import DealerCheckResult, Rank
 
 from .errors import APIErrorDetail
 from .responses import OutcomeProbabilities, ScenarioAssumptionsResponse
@@ -133,3 +140,81 @@ class ResearchComparisonResponse(BaseModel):
         | ResearchExactScenarioAnalysisResponse
         | None
     ) = None
+
+
+class ResearchBatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    state: TableStateSchema
+    definition_ids: list[ResearchDefinitionId] = Field(
+        default_factory=lambda: ["wong_halves", "zen_count", "omega_ii"],
+        min_length=1,
+        max_length=3,
+    )
+    case_count: StrictInt = Field(default=25, ge=2, le=50)
+    removed_cards_per_case: StrictInt = Field(default=6, ge=0, le=20)
+    seed: StrictInt = Field(ge=0, le=9_223_372_036_854_775_807)
+    include_ace_information: StrictBool = False
+    dealer_check_result: DealerCheckResult = DealerCheckResult.NOT_REQUIRED
+
+    @field_validator("definition_ids")
+    @classmethod
+    def batch_definitions_must_be_unique(
+        cls, value: list[ResearchDefinitionId]
+    ) -> list[ResearchDefinitionId]:
+        if len(value) != len(set(value)):
+            raise ValueError("primary research definitions must be unique")
+        return value
+
+
+class ResearchBatchCaseResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    case_id: str
+    case_index: int
+    sampled_removed_ranks: list[Rank]
+    removed_card_count: int
+    exact_reference_status: Literal["available", "unavailable"]
+    exact_reference: ResearchExactReferenceResponse
+    exact_outcome_balance: float | None
+    research_results: list[ResearchScoreResponse]
+
+
+class ResearchMetricResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    metric_id: Literal[
+        "pearson_score_vs_win_probability",
+        "pearson_score_vs_outcome_balance",
+    ]
+    definition_id: ResearchDefinitionId
+    source_id: str
+    target: Literal["exact_win_probability", "exact_outcome_balance"]
+    status: Literal[
+        "available", "insufficient_data", "undefined_constant_input"
+    ]
+    value: float | None
+    total_cases: int
+    eligible_cases: int
+    excluded_incomplete_score: int
+    excluded_exact_unavailable: int
+    excluded_nonfinite: int
+    formula: Literal["pearson_centered_sums_v1"]
+
+
+class ResearchBatchResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    method: Literal["research_batch"] = "research_batch"
+    version: Literal["1"] = "1"
+    seed: int
+    requested_case_count: int
+    completed_case_count: int
+    removed_cards_per_case: int
+    definition_ids: list[ResearchDefinitionId]
+    source: ResearchSourceResponse
+    definitions: list[ResearchDefinitionResponse]
+    cases: list[ResearchBatchCaseResponse]
+    metrics: list[ResearchMetricResponse]
+    exact_available_count: int
+    exact_unavailable_count: int

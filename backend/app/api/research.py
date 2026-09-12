@@ -6,8 +6,13 @@ from app.engine import ReconstructedTableState, build_table_state, validate_tabl
 from app.probability import ExactAnalysisError, analyze_exact_table, concrete_scenarios
 from app.research import (
     ACE_INFORMATION,
+    EXPERIMENT_VERSION,
+    ExperimentValidationError,
+    PearsonMetric,
     ResearchScore,
     compare_table_research,
+    compute_experiment_metrics,
+    generate_batch_experiment,
     get_primary_definition,
 )
 from app.schemas import (
@@ -16,12 +21,16 @@ from app.schemas import (
     AceInformationResponse,
     OutcomeProbabilities,
     PublishedResearchMetricsResponse,
+    ResearchBatchCaseResponse,
+    ResearchBatchRequest,
+    ResearchBatchResponse,
     ResearchComparisonRequest,
     ResearchComparisonResponse,
     ResearchDefinitionResponse,
     ResearchExactReferenceResponse,
     ResearchExactScenarioAnalysisResponse,
     ResearchExactScenarioResponse,
+    ResearchMetricResponse,
     ResearchScoreResponse,
     ResearchSourceResponse,
     ScenarioAssumptionsResponse,
@@ -49,7 +58,6 @@ def _source_response(definition_id: str) -> ResearchSourceResponse:
 
 def _score_response(score: ResearchScore) -> ResearchScoreResponse:
     definition = get_primary_definition(score.definition_id)
-    metrics = definition.published_metrics
     ace_information = None
     if score.ace_information is not None:
         ace_information = AceInformationResponse(
@@ -63,25 +71,48 @@ def _score_response(score: ResearchScore) -> ResearchScoreResponse:
             complete=score.ace_information.complete,
         )
     return ResearchScoreResponse(
-        definition=ResearchDefinitionResponse(
-            identifier=definition.identifier,
-            label=definition.label,
-            balanced=definition.balanced,
-            level=definition.level,
-            ace_classification=definition.ace_classification.value,
-            source=_source_response(definition.identifier),
-            published_metrics=PublishedResearchMetricsResponse(
-                pe=float(metrics.playing_efficiency),
-                bc=float(metrics.betting_correlation),
-                ic=float(metrics.insurance_correlation),
-            ),
-        ),
+        definition=_definition_response(definition.identifier),
         raw_score=float(score.score),
         raw_score_fraction=str(score.score),
         observed_known_cards=score.observed_known_cards,
         unresolved_unknown_cards=score.unresolved_unknown_cards,
         complete=score.complete,
         ace_information=ace_information,
+    )
+
+
+def _definition_response(definition_id: str) -> ResearchDefinitionResponse:
+    definition = get_primary_definition(definition_id)
+    metrics = definition.published_metrics
+    return ResearchDefinitionResponse(
+        identifier=definition.identifier,
+        label=definition.label,
+        balanced=definition.balanced,
+        level=definition.level,
+        ace_classification=definition.ace_classification.value,
+        source=_source_response(definition.identifier),
+        published_metrics=PublishedResearchMetricsResponse(
+            pe=float(metrics.playing_efficiency),
+            bc=float(metrics.betting_correlation),
+            ic=float(metrics.insurance_correlation),
+        ),
+    )
+
+
+def _metric_response(metric: PearsonMetric) -> ResearchMetricResponse:
+    return ResearchMetricResponse(
+        metric_id=metric.metric_id,
+        definition_id=metric.definition_id,
+        source_id=metric.source_id,
+        target=metric.target,
+        status=metric.status,
+        value=metric.value,
+        total_cases=metric.total_cases,
+        eligible_cases=metric.eligible_cases,
+        excluded_incomplete_score=metric.excluded_incomplete_score,
+        excluded_exact_unavailable=metric.excluded_exact_unavailable,
+        excluded_nonfinite=metric.excluded_nonfinite,
+        formula=metric.formula,
     )
 
 
@@ -162,4 +193,88 @@ def compare_research(
     return ResearchComparisonResponse(
         scores=[_score_response(score) for score in comparison.scores],
         exact_reference=exact_reference,
+    )
+
+
+@router.post(
+    "/batch",
+    response_model=ResearchBatchResponse,
+    responses={422: {"model": APIErrorResponse}},
+)
+def run_research_batch(
+    payload: ResearchBatchRequest,
+) -> ResearchBatchResponse | JSONResponse:
+    state = build_table_state(payload.state)
+    definitions = tuple(
+        get_primary_definition(identifier) for identifier in payload.definition_ids
+    )
+    try:
+        experiment = generate_batch_experiment(
+            state,
+            definitions,
+            case_count=payload.case_count,
+            removed_cards_per_case=payload.removed_cards_per_case,
+            seed=payload.seed,
+            include_ace_information=payload.include_ace_information,
+            dealer_check_result=payload.dealer_check_result,
+        )
+    except ExperimentValidationError as error:
+        return _error_response(error.code, error.message)
+
+    metrics = compute_experiment_metrics(
+        experiment.cases, experiment.definition_ids
+    )
+    cases: list[ResearchBatchCaseResponse] = []
+    for case in experiment.cases:
+        reference = case.exact_reference
+        exact_response = (
+            ResearchExactReferenceResponse(
+                status="complete",
+                outcomes=OutcomeProbabilities(
+                    win=reference.outcomes.win,
+                    push=reference.outcomes.push,
+                    loss=reference.outcomes.loss,
+                ),
+            )
+            if reference.outcomes is not None
+            else ResearchExactReferenceResponse(
+                status="unavailable",
+                error=APIErrorDetail(
+                    code=reference.error_code or "exact_unavailable",
+                    message=reference.error_message or "Exact analysis unavailable.",
+                ),
+            )
+        )
+        cases.append(
+            ResearchBatchCaseResponse(
+                case_id=case.case_id,
+                case_index=case.case_index,
+                sampled_removed_ranks=list(case.sampled_removed_ranks),
+                removed_card_count=len(case.sampled_removed_ranks),
+                exact_reference_status=case.exact_reference.status,
+                exact_reference=exact_response,
+                exact_outcome_balance=case.exact_outcome_balance,
+                research_results=[
+                    _score_response(result) for result in case.research_results
+                ],
+            )
+        )
+    return ResearchBatchResponse(
+        version=EXPERIMENT_VERSION,
+        seed=experiment.seed,
+        requested_case_count=experiment.requested_case_count,
+        completed_case_count=len(experiment.cases),
+        removed_cards_per_case=experiment.removed_cards_per_case,
+        definition_ids=list(experiment.definition_ids),
+        source=_source_response(experiment.definition_ids[0]),
+        definitions=[
+            _definition_response(identifier)
+            for identifier in experiment.definition_ids
+        ],
+        cases=cases,
+        metrics=[_metric_response(metric) for metric in metrics],
+        exact_available_count=(
+            len(experiment.cases) - experiment.exact_unavailable_count
+        ),
+        exact_unavailable_count=experiment.exact_unavailable_count,
     )

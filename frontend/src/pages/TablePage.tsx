@@ -5,6 +5,7 @@ import AnalysisPanel from "../components/analysis/AnalysisPanel";
 import BlackjackTable from "../components/table/BlackjackTable";
 import EventHistory from "../components/table/EventHistory";
 import ShoeStatus from "../components/table/ShoeStatus";
+import ResearchPanel from "../components/research/ResearchPanel";
 import type { SessionAction } from "../domain/events";
 import type { SessionState } from "../state/gameReducer";
 import { selectTableState } from "../state/selectors";
@@ -38,6 +39,8 @@ export default function TablePage({ dispatch, state }: TablePageProps) {
       />
 
       <AnalysisPanel state={state} />
+
+      <ResearchPanel state={state} />
 
       <div className="button-row session-actions" aria-label="Session actions">
         <button
