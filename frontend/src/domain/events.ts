@@ -29,6 +29,12 @@ export type DealUnknownCardEvent = EventIdentity &
     target: TableTarget;
   }>;
 
+export type PlayerAddedEvent = EventIdentity &
+  Readonly<{
+    type: "PLAYER_ADDED";
+    seat: SeatNumber;
+  }>;
+
 export type RoundCompleteEvent = EventIdentity &
   Readonly<{
     type: "ROUND_COMPLETE";
@@ -41,6 +47,7 @@ export type ShuffleEvent = EventIdentity &
 
 export type GameEvent =
   | NewShoeEvent
+  | PlayerAddedEvent
   | DealKnownCardEvent
   | DealUnknownCardEvent
   | RoundCompleteEvent
@@ -52,6 +59,7 @@ export type SessionAction =
       configuration: SessionConfiguration;
     }>
   | Readonly<{ type: "NEW_SHOE" }>
+  | Readonly<{ type: "ADD_PLAYER"; seat: SeatNumber }>
   | Readonly<{
       type: "DEAL_KNOWN_CARD";
       target: TableTarget;

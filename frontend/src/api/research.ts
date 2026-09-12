@@ -140,6 +140,7 @@ export async function compareResearch(
   definitionIds: readonly ResearchDefinitionId[],
   includeAceInformation: boolean,
   signal?: AbortSignal,
+  includeExactReference = true,
 ): Promise<ResearchComparisonResponse> {
   const response = await fetch(`${getApiBaseUrl()}/research/compare`, {
     method: "POST",
@@ -149,7 +150,7 @@ export async function compareResearch(
       options: {
         primary_definition_ids: definitionIds,
         include_ace_information: includeAceInformation,
-        include_exact_reference: true,
+        include_exact_reference: includeExactReference,
       },
     }),
     signal,

@@ -3,7 +3,7 @@ import type { SessionRules } from "../domain/rules";
 import type { SessionState } from "./gameReducer";
 
 export const DEFAULT_RULES: SessionRules = {
-  decks: null,
+  decks: 1,
   dealerSoft17: "stand",
   splittingEnabled: true,
   maxSplitHands: 4,
@@ -19,8 +19,8 @@ export const DEFAULT_RULES: SessionRules = {
 
 export const DEFAULT_CONFIGURATION: SessionConfiguration = {
   rules: DEFAULT_RULES,
-  activeSeats: [1],
-  userSeat: 1,
+  activeSeats: [],
+  userSeat: null,
 };
 
 export function createInitialState(

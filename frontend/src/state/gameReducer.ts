@@ -31,6 +31,15 @@ function appendEvent(
   };
 }
 
+function ensureSessionStarted(state: SessionState): SessionState {
+  return state.events.some((event) => event.type === "NEW_SHOE")
+    ? state
+    : appendEvent(state, {
+        type: "NEW_SHOE",
+        configuration: state.configuration,
+      });
+}
+
 export function gameReducer(
   state: SessionState,
   action: SessionAction,
@@ -45,23 +54,61 @@ export function gameReducer(
         type: "NEW_SHOE",
         configuration: state.configuration,
       });
-    case "DEAL_KNOWN_CARD":
-      return appendEvent(state, {
+    case "ADD_PLAYER": {
+      if (state.configuration.activeSeats.includes(action.seat)) return state;
+      const started = ensureSessionStarted(state);
+      const activeSeats = [...started.configuration.activeSeats, action.seat]
+        .sort((left, right) => left - right);
+      return appendEvent({
+        ...started,
+        configuration: {
+          ...started.configuration,
+          activeSeats,
+          userSeat: started.configuration.userSeat ?? action.seat,
+        },
+      }, { type: "PLAYER_ADDED", seat: action.seat });
+    }
+    case "DEAL_KNOWN_CARD": {
+      if (action.target.kind === "player" &&
+          !state.configuration.activeSeats.includes(action.target.seat)) return state;
+      return appendEvent(ensureSessionStarted(state), {
         type: "DEAL_KNOWN_CARD",
         target: action.target,
         card: action.card,
       });
-    case "DEAL_UNKNOWN_CARD":
-      return appendEvent(state, {
+    }
+    case "DEAL_UNKNOWN_CARD": {
+      if (action.target.kind === "player" &&
+          !state.configuration.activeSeats.includes(action.target.seat)) return state;
+      return appendEvent(ensureSessionStarted(state), {
         type: "DEAL_UNKNOWN_CARD",
         target: action.target,
       });
+    }
     case "ROUND_COMPLETE":
       return appendEvent(state, { type: "ROUND_COMPLETE" });
     case "SHUFFLE":
       return appendEvent(state, { type: "SHUFFLE" });
-    case "UNDO":
-      return { ...state, events: state.events.slice(0, -1) };
+    case "UNDO": {
+      const undone = state.events.at(-1);
+      if (!undone) return state;
+      if (undone.type !== "PLAYER_ADDED") {
+        return { ...state, events: state.events.slice(0, -1) };
+      }
+      const activeSeats = state.configuration.activeSeats.filter(
+        (seat) => seat !== undone.seat,
+      );
+      return {
+        configuration: {
+          ...state.configuration,
+          activeSeats,
+          userSeat: state.configuration.userSeat === undone.seat
+            ? null
+            : state.configuration.userSeat,
+        },
+        events: state.events.slice(0, -1),
+      };
+    }
     case "RESET":
       return createInitialState();
     case "IMPORT_REPLAY":

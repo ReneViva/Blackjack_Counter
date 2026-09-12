@@ -59,17 +59,13 @@ export default function ReplayControls({ state, onActivate }: ReplayControlsProp
     }
   };
 
-  return <section className="replay-controls" aria-labelledby="replay-controls-heading">
-    <div>
-      <h2 id="replay-controls-heading">Session replay</h2>
-      <p>Export deterministic event chronology or import a validated replay. Import replaces the active session only after all checks pass.</p>
-    </div>
+  return <section className="replay-controls" aria-label="Session replay controls">
     <div className="replay-actions">
-      <button type="button" className="button-secondary" disabled={!hasSession} onClick={exportReplay}>Export Session Replay</button>
-      <label className="file-control">
-        Import Replay (.json)
+      <label className="button-secondary replay-import-control">
+        <span aria-hidden="true">↥</span> Import Replay
         <input
           type="file"
+          aria-label="Import Replay (.json)"
           accept=".json,application/json"
           disabled={status === "loading"}
           onChange={(event) => {
@@ -79,7 +75,8 @@ export default function ReplayControls({ state, onActivate }: ReplayControlsProp
           }}
         />
       </label>
+      <button type="button" className="button-secondary" aria-label="Export Session Replay" disabled={!hasSession} onClick={exportReplay}><span aria-hidden="true">↧</span> Export Session</button>
     </div>
-    {message && <p className={status === "error" ? "analysis-error" : "analysis-note"} role={status === "error" ? "alert" : "status"}>{message}</p>}
+    {message && <p className={`replay-message${status === "error" ? " replay-message--error" : ""}`} role={status === "error" ? "alert" : "status"}>{message}</p>}
   </section>;
 }

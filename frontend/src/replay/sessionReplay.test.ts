@@ -123,6 +123,21 @@ describe("session replay version 1", () => {
     expect(parseSessionReplay(serializeSessionReplay(unknownModel))).toEqual(unknownModel);
   });
 
+  it("round-trips direct player additions through event chronology", () => {
+    let direct = gameReducer(createInitialState({
+      ...configuration,
+      activeSeats: [],
+      userSeat: null,
+    }), { type: "ADD_PLAYER", seat: 4 });
+    direct = gameReducer(direct, {
+      type: "DEAL_KNOWN_CARD",
+      target: { kind: "player", seat: 4 },
+      card: { kind: "known", rank: "8", suit: "hearts" },
+    });
+
+    expect(parseSessionReplay(serializeSessionReplay(direct))).toEqual(direct);
+  });
+
   it("compares final-state objects semantically rather than by key order", () => {
     const replay = replayObject();
     const finalState = replay.final_state as Record<string, unknown>;

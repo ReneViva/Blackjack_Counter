@@ -37,7 +37,7 @@ describe("backend connectivity", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("Backend connected")).toBeVisible();
+    expect(await screen.findByText(/Backend connected/)).toBeVisible();
   });
 
   it("shows the unavailable state after a failed health request", async () => {
@@ -63,7 +63,7 @@ describe("backend connectivity", () => {
       await screen.findByRole("button", { name: "Retry connection" }),
     );
 
-    expect(await screen.findByText("Backend connected")).toBeVisible();
+    expect(await screen.findByText(/Backend connected/)).toBeVisible();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -91,8 +91,8 @@ describe("backend connectivity", () => {
       target: { files: [file] },
     });
 
-    expect(await screen.findByRole("region", { name: "Observed blackjack table" })).toBeVisible();
+    expect(await screen.findByRole("region", { name: "Interactive observed blackjack table" })).toBeVisible();
     expect(screen.getByText("2 decks")).toBeVisible();
-    expect(screen.getByRole("heading", { name: /Player seat 2/ })).toHaveTextContent("You");
+    expect(screen.getByRole("button", { name: /Seat 2, occupied, primary hand/ })).toBeVisible();
   });
 });

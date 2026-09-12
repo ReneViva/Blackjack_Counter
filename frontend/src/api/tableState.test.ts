@@ -65,7 +65,10 @@ describe("table-state transport contract", () => {
   });
 
   it("preserves unknown deck count without a fallback", () => {
-    expect(toTableStatePayload(createInitialState()).rules.decks).toBeNull();
+    expect(toTableStatePayload(createInitialState({
+      ...configuration,
+      rules: { ...configuration.rules, decks: null },
+    })).rules.decks).toBeNull();
   });
 
   it("serializes every configurable gameplay rule", () => {

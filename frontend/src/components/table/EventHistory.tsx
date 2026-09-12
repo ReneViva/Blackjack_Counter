@@ -8,6 +8,8 @@ function describeEvent(event: GameEvent): string {
   switch (event.type) {
     case "NEW_SHOE":
       return "New shoe started";
+    case "PLAYER_ADDED":
+      return `Player added at seat ${event.seat}`;
     case "DEAL_KNOWN_CARD": {
       const target =
         event.target.kind === "dealer"

@@ -1,118 +1,111 @@
-import { useState } from "react";
-
-import {
-  RANKS,
-  SUITS,
-  type KnownCard,
-  type Rank,
-  type Suit,
-} from "../../domain/card";
-import type { SeatNumber } from "../../domain/game";
+import { RANKS, SUITS, type KnownCard, type Suit } from "../../domain/card";
 import type { TableTarget } from "../../domain/events";
+import type { DerivedTableState } from "../../state/selectors";
+import { cardAccessibleName, SUIT_SYMBOLS } from "../table/PlayingCard";
 
 type CardPickerProps = Readonly<{
-  activeSeats: readonly SeatNumber[];
+  activeTarget: TableTarget | null;
+  decks: number | null;
   onKnownCard: (target: TableTarget, card: KnownCard) => void;
   onUnknownCard: (target: TableTarget) => void;
+  table: DerivedTableState;
 }>;
 
-function targetValue(target: TableTarget): string {
-  return target.kind === "dealer" ? "dealer" : `player-${target.seat}`;
-}
+const SUIT_LABELS: Record<Suit, string> = {
+  spades: "Spades",
+  hearts: "Hearts",
+  diamonds: "Diamonds",
+  clubs: "Clubs",
+};
 
-function parseTarget(value: string): TableTarget {
-  if (value === "dealer") {
-    return { kind: "dealer" };
-  }
-
-  return {
-    kind: "player",
-    seat: Number(value.replace("player-", "")) as SeatNumber,
-  };
-}
+const CARD_PICKER_RANKS = [...RANKS.slice(1), RANKS[0]];
 
 export default function CardPicker({
-  activeSeats,
+  activeTarget,
+  decks,
   onKnownCard,
   onUnknownCard,
+  table,
 }: CardPickerProps) {
-  const [target, setTarget] = useState<TableTarget>({ kind: "dealer" });
-  const [rank, setRank] = useState<Rank>("A");
-  const [suit, setSuit] = useState<Suit>("spades");
+  const observed = [
+    ...table.dealerCards,
+    ...table.discardedCards,
+    ...Object.values(table.playerCards).flat(),
+  ];
+  const targetName = activeTarget?.kind === "dealer"
+    ? "Dealer"
+    : activeTarget?.kind === "player"
+      ? `Seat ${activeTarget.seat}`
+      : null;
+
+  const isUnavailable = (card: KnownCard): boolean => {
+    if (decks === null) return false;
+    const usedCopies = observed.filter((item) => item.kind === "known" &&
+      item.rank === card.rank && item.suit === card.suit).length;
+    return usedCopies >= decks;
+  };
 
   return (
-    <section className="panel card-picker" aria-labelledby="card-picker-title">
-      <div className="section-heading">
+    <section className="workspace-panel card-picker" aria-labelledby="card-picker-title">
+      <div className="workspace-panel__heading">
         <div>
-          <p className="eyebrow">Observation input</p>
-          <h2 id="card-picker-title">Add a card</h2>
+          <p className="eyebrow">Direct observation</p>
+          <h2 id="card-picker-title">Card Assignment</h2>
         </div>
-        <p>Record what was observed; Python remains authoritative.</p>
+        <span className="panel-icon" aria-hidden="true">♠</span>
+      </div>
+      <p className="assignment-prompt" aria-live="polite">
+        {targetName
+          ? <>Assigning to: <strong>{targetName}</strong></>
+          : "Select an occupied seat or the dealer first"}
+      </p>
+
+      <div className="card-inventory" aria-label="All 52 cards">
+        {SUITS.map((suit) => (
+          <section
+            className={`suit-group suit-group--${suit}`}
+            key={suit}
+            aria-labelledby={`suit-${suit}`}
+          >
+            <h3 id={`suit-${suit}`}>{SUIT_SYMBOLS[suit]} {SUIT_LABELS[suit]}</h3>
+            <div className="picker-card-grid">
+              {CARD_PICKER_RANKS.map((rank, index) => {
+                const card = { kind: "known", rank, suit } as const;
+                const unavailable = isUnavailable(card);
+                return (
+                  <button
+                    type="button"
+                    className={`picker-card picker-card--${suit}${index === 6 ? " picker-card--row-break" : ""}`}
+                    disabled={!activeTarget || unavailable}
+                    key={`${rank}-${suit}`}
+                    aria-label={`${cardAccessibleName(rank, suit)}${unavailable ? ", unavailable" : ""}`}
+                    onClick={() => activeTarget && onKnownCard(activeTarget, card)}
+                  >
+                    <span>{rank}</span>
+                    <span aria-hidden="true">{SUIT_SYMBOLS[suit]}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        ))}
       </div>
 
-      <div className="control-grid control-grid--cards">
-        <label>
-          Target
-          <select
-            aria-label="Card target"
-            value={targetValue(target)}
-            onChange={(event) => setTarget(parseTarget(event.target.value))}
-          >
-            <option value="dealer">Dealer</option>
-            {activeSeats.map((seat) => (
-              <option key={seat} value={`player-${seat}`}>
-                Player seat {seat}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label>
-          Rank
-          <select
-            aria-label="Card rank"
-            value={rank}
-            onChange={(event) => setRank(event.target.value as Rank)}
-          >
-            {RANKS.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label>
-          Suit
-          <select
-            aria-label="Card suit"
-            value={suit}
-            onChange={(event) => setSuit(event.target.value as Suit)}
-          >
-            {SUITS.map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      <div className="button-row">
+      <div className="unknown-card-control">
         <button
           type="button"
-          onClick={() => onKnownCard(target, { kind: "known", rank, suit })}
+          className="unknown-card-button"
+          disabled={!activeTarget}
+          aria-label="Assign unknown card"
+          onClick={() => activeTarget && onUnknownCard(activeTarget)}
         >
-          Add known card
-        </button>
-        <button
-          className="button-secondary"
-          type="button"
-          onClick={() => onUnknownCard(target)}
-        >
-          Add unknown card
+          <strong aria-hidden="true">?</strong>
+          <span>Unknown</span>
         </button>
       </div>
+      <p className="picker-note">
+        Used copies are disabled for known deck counts. Python validation remains authoritative.
+      </p>
     </section>
   );
 }

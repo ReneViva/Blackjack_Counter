@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -12,118 +13,81 @@ function renderApp() {
   render(<App />);
 }
 
-function configureAndStart() {
-  fireEvent.change(screen.getByLabelText("Deck count"), {
-    target: { value: "6" },
-  });
-  fireEvent.change(screen.getByLabelText("Active player seats"), {
-    target: { value: "3" },
-  });
-  fireEvent.change(screen.getByLabelText("Your seat"), {
-    target: { value: "2" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Start new shoe" }));
-}
-
-describe("setup and table flow", () => {
-  it("keeps unknown deck count explicit by default", () => {
+describe("direct-manipulation table flow", () => {
+  it("renders the three major regions, dealer, and all seven empty seats", () => {
     renderApp();
 
-    expect(screen.getByLabelText("Deck count")).toHaveValue("unknown");
-    expect(screen.getByLabelText("Splitting enabled")).toBeChecked();
-    expect(screen.getByLabelText("Maximum split hands")).toHaveValue("4");
-    expect(screen.getByLabelText("Doubling enabled")).toBeChecked();
-    expect(screen.getByLabelText("Surrender")).toHaveValue("none");
-    expect(screen.getByLabelText("Dealer second card")).toHaveValue(
-      "hole_card",
-    );
-    expect(screen.getByLabelText("Dealer blackjack check")).toHaveValue(
-      "no_peek",
-    );
+    expect(screen.getByRole("complementary", { name: "Analysis" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Blackjack table workspace" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Card Assignment" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Dealer" })).toBeVisible();
+    expect(screen.getAllByRole("button", { name: /Add player at Seat/ })).toHaveLength(7);
+    expect(within(screen.getByLabelText("All 52 cards")).getAllByRole("button")).toHaveLength(52);
+    expect(screen.getByRole("button", { name: "Assign unknown card" })).toBeDisabled();
   });
 
-  it("configures extended rules and keeps no-hole-card combinations valid", () => {
+  it("adds Seat 4 through the reducer and assigns player and dealer cards directly", () => {
     renderApp();
 
-    fireEvent.click(screen.getByLabelText("Resplit Aces"));
-    fireEvent.click(screen.getByLabelText("Hit split Aces"));
-    fireEvent.click(screen.getByLabelText("Blackjack after split"));
-    fireEvent.click(screen.getByLabelText("Double after split"));
-    fireEvent.change(screen.getByLabelText("Surrender"), {
-      target: { value: "late" },
-    });
-    fireEvent.change(screen.getByLabelText("Dealer blackjack check"), {
-      target: { value: "peek" },
-    });
-    expect(screen.getByLabelText("Dealer blackjack check")).toHaveValue("peek");
+    fireEvent.click(screen.getByRole("button", { name: "Add player at Seat 4" }));
+    const seat = screen.getByRole("button", { name: /Seat 4, occupied, primary hand, active target/ });
+    expect(seat).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(/Assigning to:/)).toHaveTextContent("Seat 4");
 
-    fireEvent.change(screen.getByLabelText("Dealer second card"), {
-      target: { value: "no_hole_card" },
-    });
-    expect(screen.getByLabelText("Dealer blackjack check")).toHaveValue(
-      "no_peek",
-    );
-    expect(screen.getByLabelText("Dealer blackjack check")).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Eight of hearts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Six of spades" }));
+    const seatCards = screen.getByLabelText("Seat 4 observed cards");
+    expect(within(seatCards).getByLabelText("Eight of hearts")).toBeVisible();
+    expect(within(seatCards).getByLabelText("Six of spades")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dealer" }));
+    expect(screen.getByRole("button", { name: "Dealer, active target" })).toHaveAttribute("aria-pressed", "true");
+    expect(seat).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Ten of diamonds" }));
+    fireEvent.click(screen.getByRole("button", { name: "Assign unknown card" }));
+
+    const dealerCards = screen.getByLabelText("Dealer observed cards");
+    expect(within(dealerCards).getByLabelText("Ten of diamonds")).toBeVisible();
+    expect(within(dealerCards).getByLabelText("Unknown card")).toBeVisible();
+    const information = screen.getByRole("region", { name: "Table Information" });
+    expect(information).toHaveTextContent("Known observations3");
+    expect(information).toHaveTextContent("Unknown observations1");
   });
 
-  it("starts a configured table with active and selected seats", () => {
+  it("does not assign a card without a target and supports event-sourced undo", () => {
     renderApp();
-    configureAndStart();
 
-    expect(screen.getByRole("region", { name: "Observed blackjack table" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Dealer" })).toBeVisible();
-    expect(screen.getByRole("heading", { name: /Player seat 1/ })).toBeVisible();
-    expect(screen.getByRole("heading", { name: /Player seat 2/ })).toHaveTextContent("You");
-    expect(screen.getByRole("heading", { name: /Player seat 3/ })).toBeVisible();
-    expect(screen.getByText("6 decks")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Eight of hearts" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Add player at Seat 4" }));
+    fireEvent.click(screen.getByRole("button", { name: "Eight of hearts" }));
+    expect(screen.getByLabelText("Seat 4 observed cards")).toHaveTextContent("8");
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(screen.getByLabelText("Seat 4 observed cards")).toBeEmptyDOMElement();
   });
 
-  it("records exact and unknown cards and supports undo", () => {
+  it("keeps rules in compact settings and preserves advanced analysis access", () => {
     renderApp();
-    configureAndStart();
 
-    fireEvent.change(screen.getByLabelText("Card target"), {
-      target: { value: "player-2" },
-    });
-    fireEvent.change(screen.getByLabelText("Card rank"), {
-      target: { value: "K" },
-    });
-    fireEvent.change(screen.getByLabelText("Card suit"), {
-      target: { value: "hearts" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Add known card" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open table settings" }));
+    expect(screen.getByRole("dialog", { name: "Table settings" })).toBeVisible();
+    expect(screen.getByLabelText("Deck count")).toHaveValue("1");
+    fireEvent.change(screen.getByLabelText("Deck count"), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close table settings" }));
 
-    const userCards = screen.getByLabelText("Player seat 2 observed cards");
-    expect(within(userCards).getByLabelText("K of hearts")).toBeVisible();
-
-    fireEvent.change(screen.getByLabelText("Card target"), {
-      target: { value: "dealer" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Add unknown card" }));
-    expect(
-      within(screen.getByLabelText("Dealer observed cards")).getByLabelText(
-        "Unknown card",
-      ),
-    ).toBeVisible();
-    expect(screen.getByText("3 events")).toBeVisible();
-
-    fireEvent.click(screen.getByRole("button", { name: "Undo last event" }));
-    expect(
-      within(screen.getByLabelText("Dealer observed cards")).queryByLabelText(
-        "Unknown card",
-      ),
-    ).not.toBeInTheDocument();
-    expect(within(userCards).getByLabelText("K of hearts")).toBeVisible();
+    fireEvent.click(screen.getByText("Advanced analysis, Monte Carlo, research experiments, and history"));
+    expect(screen.getByLabelText("Analysis method")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Run offline experiment" })).toBeVisible();
   });
 
-  it("resets the table back to setup", () => {
+  it("exposes replay controls without unsafe strategy or wagering controls", () => {
     renderApp();
-    configureAndStart();
 
-    fireEvent.click(screen.getByRole("button", { name: "Reset session" }));
-
-    expect(
-      screen.getByRole("heading", { name: "Configure the observed table" }),
-    ).toBeVisible();
+    expect(screen.getByLabelText("Import Replay (.json)")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Export Session Replay" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Add player at Seat 4" }));
+    expect(screen.getByRole("button", { name: "Export Session Replay" })).toBeEnabled();
+    expect(screen.queryByText(/Suggested:\s*(Hit|Stand|Double|Split)/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/wager|bankroll|bet size|true count/i)).not.toBeInTheDocument();
   });
 });

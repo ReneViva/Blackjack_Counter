@@ -14,12 +14,14 @@ import {
 
 type SetupPageProps = Readonly<{
   configuration: SessionConfiguration;
+  disabled?: boolean;
   onChange: (configuration: SessionConfiguration) => void;
   onStart: () => void;
 }>;
 
 export default function SetupPage({
   configuration,
+  disabled = false,
   onChange,
   onStart,
 }: SetupPageProps) {
@@ -35,7 +37,7 @@ export default function SetupPage({
       configuration.userSeat !== null &&
       activeSeats.includes(configuration.userSeat)
         ? configuration.userSeat
-        : activeSeats[0];
+        : (activeSeats[0] ?? null);
     onChange({ ...configuration, activeSeats, userSeat });
   };
 
@@ -49,6 +51,8 @@ export default function SetupPage({
         <p>Unknown assumptions stay explicit.</p>
       </div>
 
+      {disabled && <p className="settings-note">Rules are fixed for the active chronology. Start a new session to change them.</p>}
+      <fieldset className="settings-fieldset" disabled={disabled}>
       <div className="control-grid">
         <label>
           Deck count
@@ -78,6 +82,7 @@ export default function SetupPage({
             value={configuration.activeSeats.length}
             onChange={(event) => updateSeatCount(Number(event.target.value))}
           >
+            <option value={0}>0</option>
             {SEAT_NUMBERS.map((count) => (
               <option key={count} value={count}>
                 {count}
@@ -270,6 +275,7 @@ export default function SetupPage({
       <button className="button-primary" type="button" onClick={onStart}>
         Start new shoe
       </button>
+      </fieldset>
     </section>
   );
 }

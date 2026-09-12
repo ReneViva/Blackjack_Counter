@@ -22,11 +22,31 @@ function startSession() {
 }
 
 describe("frontend session and event model", () => {
-  it("starts with an explicit unknown deck count", () => {
+  it("starts with a one-deck lab default and no fabricated seats", () => {
     const state = createInitialState();
 
-    expect(state.configuration.rules.decks).toBeNull();
+    expect(state.configuration.rules.decks).toBe(1);
+    expect(state.configuration.activeSeats).toEqual([]);
+    expect(state.configuration.userSeat).toBeNull();
     expect(state.events).toEqual([]);
+  });
+
+  it("adds a real player seat and starts a deterministic chronology", () => {
+    const added = gameReducer(createInitialState(), { type: "ADD_PLAYER", seat: 4 });
+
+    expect(added.configuration.activeSeats).toEqual([4]);
+    expect(added.configuration.userSeat).toBe(4);
+    expect(added.events.map((event) => event.type)).toEqual(["NEW_SHOE", "PLAYER_ADDED"]);
+    expect(added.events.at(-1)).toMatchObject({ id: "evt_0002", sequence: 2, seat: 4 });
+  });
+
+  it("undoes a player-add event without leaving a phantom active seat", () => {
+    const added = gameReducer(createInitialState(), { type: "ADD_PLAYER", seat: 4 });
+    const undone = gameReducer(added, { type: "UNDO" });
+
+    expect(undone.configuration.activeSeats).toEqual([]);
+    expect(undone.configuration.userSeat).toBeNull();
+    expect(undone.events.map((event) => event.type)).toEqual(["NEW_SHOE"]);
   });
 
   it("records deterministic chronological event identities", () => {
