@@ -109,6 +109,14 @@ def validate_table_state(state: ReconstructedTableState) -> ValidationResult:
                 )
             )
 
+    if state.dealer_soft_17 is None:
+        warnings.append(
+            ValidationIssue(
+                code="dealer_soft_17_unknown",
+                message="Soft-17 behavior will be analyzed as separate rule scenarios.",
+                field="rules.dealer_soft_17",
+            )
+        )
     seats = [player.seat for player in state.players]
     for seat in seats:
         if not 1 <= seat <= 7:

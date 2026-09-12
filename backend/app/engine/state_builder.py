@@ -29,7 +29,7 @@ class ReconstructedPlayerHand:
 @dataclass(frozen=True, slots=True)
 class ReconstructedTableState:
     deck_count: int | None
-    dealer_soft_17: DealerSoft17
+    dealer_soft_17: DealerSoft17 | None
     dealer_hand: Hand
     players: tuple[ReconstructedPlayerHand, ...]
     discarded_cards: tuple[ObservedCard, ...]
@@ -78,7 +78,10 @@ def build_table_state(payload: TableStateSchema) -> ReconstructedTableState:
     )
 
     game_state: GameState | None = None
-    if payload.rules.decks is not None:
+    if (
+        payload.rules.decks is not None
+        and payload.rules.dealer_soft_17 is not None
+    ):
         rules = Rules(
             decks=payload.rules.decks,
             dealer_soft_17=payload.rules.dealer_soft_17,

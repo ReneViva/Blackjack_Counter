@@ -88,30 +88,27 @@ def test_exact_analysis_rejects_malformed_transport() -> None:
     assert response.status_code == 422
 
 
-def test_exact_analysis_defers_unknown_cards() -> None:
+def test_exact_analysis_marginalizes_unknown_cards() -> None:
     state = exact_micro_state()
     state["dealer"] = {"cards": [known("6", "D"), {"kind": "unknown"}]}
 
     response = client.post("/api/analyze", json=request_for(state))
 
-    assert response.status_code == 422
-    assert response.json() == {
-        "error": {
-            "code": "exact_analysis_requires_resolved_hidden_composition",
-            "message": "Exact analysis requires every observed card identity to be resolved.",
-            "field": None,
-        }
-    }
+    assert response.status_code == 200
+    assert response.json()["state_summary"]["hidden_cards"] == 1
+    assert response.json()["metadata"]["hidden_states_evaluated"] > 0
+    assert response.json()["metadata"]["hidden_weight_mass"] == 1.0
 
 
-def test_exact_analysis_defers_unknown_deck_count() -> None:
+def test_exact_analysis_reports_unknown_deck_scenarios() -> None:
     state = exact_micro_state()
     state["rules"] = {"decks": None, "dealer_soft_17": "stand"}
 
     response = client.post("/api/analyze", json=request_for(state))
 
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == "exact_analysis_requires_known_deck"
+    assert response.status_code == 200
+    assert response.json()["model_uncertainty"] == ["deck_count"]
+    assert len(response.json()["scenarios"]) == 8
 
 
 def test_exact_analysis_rejects_unmarked_user_target() -> None:

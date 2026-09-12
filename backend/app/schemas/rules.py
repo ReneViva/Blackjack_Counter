@@ -24,7 +24,7 @@ class RulesSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     decks: KnownDeckCount | None
-    dealer_soft_17: DealerSoft17
+    dealer_soft_17: DealerSoft17 | None
     splitting_enabled: StrictBool = True
     max_split_hands: Annotated[StrictInt, Field(ge=1, le=4)] = 4
     resplit_aces: StrictBool = False
