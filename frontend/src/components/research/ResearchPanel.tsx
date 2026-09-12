@@ -11,6 +11,12 @@ import {
   type ResearchDefinition,
   type ResearchDefinitionId,
 } from "../../api/research";
+import { toTableStatePayload } from "../../api/tableState";
+import { downloadJsonFile } from "../../replay/download";
+import {
+  serializeResearchBatchExport,
+  type ResearchBatchExportRequest,
+} from "../../replay/researchExport";
 import type { SessionState } from "../../state/gameReducer";
 
 type RequestStatus = "idle" | "loading" | "success" | "error";
@@ -57,6 +63,7 @@ export default function ResearchPanel({ state }: ResearchPanelProps) {
   const [current, setCurrent] = useState<ResearchComparisonResponse | null>(null);
   const [batch, setBatch] = useState<ResearchBatchResponse | null>(null);
   const [batchSeed, setBatchSeed] = useState<string | null>(null);
+  const [batchRequest, setBatchRequest] = useState<ResearchBatchExportRequest | null>(null);
   const [currentError, setCurrentError] = useState<string | null>(null);
   const [batchError, setBatchError] = useState<string | null>(null);
   const currentController = useRef<AbortController | null>(null);
@@ -116,17 +123,27 @@ export default function ResearchPanel({ state }: ResearchPanelProps) {
     batchController.current?.abort();
     const controller = new AbortController();
     batchController.current = controller;
-    setBatchStatus("loading"); setBatchError(null); setBatch(null); setBatchSeed(null);
+    setBatchStatus("loading"); setBatchError(null); setBatch(null); setBatchSeed(null); setBatchRequest(null);
     try {
       const submittedSeed = seed;
-      setBatch(await runResearchBatch(state, {
+      const request: ResearchBatchExportRequest = {
+        state: toTableStatePayload(state),
+        definition_ids: definitionIds,
+        case_count: caseCount,
+        removed_cards_per_case: removedCards,
+        seed: submittedSeed,
+        include_ace_information: includeAce,
+      };
+      const result = await runResearchBatch(state, {
         definitionIds,
         caseCount,
         removedCardsPerCase: removedCards,
         seed: submittedSeed,
         includeAceInformation: includeAce,
-      }, controller.signal));
+      }, controller.signal);
+      setBatch(result);
       setBatchSeed(submittedSeed);
+      setBatchRequest(request);
       setBatchStatus("success");
     } catch (error: unknown) {
       if (error instanceof DOMException && error.name === "AbortError") return;
@@ -158,6 +175,7 @@ export default function ResearchPanel({ state }: ResearchPanelProps) {
       <h3>Offline research experiment</h3>
       <div className="research-controls"><label>Case count (2–50)<input aria-label="Research case count" type="number" min="2" max="50" step="1" value={caseCount} onChange={(event) => setCaseCount(Number(event.target.value))} /></label><label>Known cards removed per case (0–20)<input aria-label="Removed cards per research case" type="number" min="0" max="20" step="1" value={removedCards} onChange={(event) => setRemovedCards(Number(event.target.value))} /></label><label>Required reproducibility seed<input aria-label="Research seed" type="text" inputMode="numeric" pattern="[0-9]+" required value={seed} onChange={(event) => setSeed(event.target.value.trim())} /></label></div>
       <button type="button" onClick={() => void runBatch()} disabled={batchStatus === "loading"}>{batchStatus === "loading" ? "Running bounded experiment..." : "Run offline experiment"}</button>
+      {batch && batchRequest && <button type="button" className="button-secondary" onClick={() => downloadJsonFile("blackjack-research-batch.json", serializeResearchBatchExport(batchRequest, batch))}>Export Research JSON</button>}
       {batchStatus === "error" && <p className="analysis-error" role="alert">{batchError}</p>}
       {batch && <div className="research-results" aria-live="polite"><p><strong>Experiment summary:</strong> seed {batchSeed ?? String(batch.seed)} · {batch.completed_case_count}/{batch.requested_case_count} cases · {batch.removed_cards_per_case} known removals per independent case · exact references {batch.exact_available_count} available/{batch.exact_unavailable_count} unavailable.</p><DefinitionCards definitions={batch.definitions} /><div className="table-scroll"><table><caption>Computed experiment metrics</caption><thead><tr><th>System</th><th>Association target</th><th>Correlation</th><th>Status</th><th>Eligible n</th><th>Exclusions</th></tr></thead><tbody>{batch.metrics.map((metric) => <tr key={`${metric.definition_id}-${metric.metric_id}`}><th scope="row">{batch.definitions.find((definition) => definition.identifier === metric.definition_id)?.label ?? metric.definition_id}</th><td>{metric.target === "exact_win_probability" ? "Raw score vs exact win probability" : "Raw score vs exact outcome balance"}</td><td>{correlation(metric.value)}</td><td>{metric.status.replaceAll("_", " ")}</td><td>{metric.eligible_cases}/{metric.total_cases}</td><td>Incomplete {metric.excluded_incomplete_score}; exact unavailable {metric.excluded_exact_unavailable}; nonfinite {metric.excluded_nonfinite}</td></tr>)}</tbody></table></div><p className="metric-note">Pearson correlation: +1 perfect positive linear association, 0 no linear association, −1 perfect negative linear association. No causal interpretation is implied.</p><div className="table-scroll"><table><caption>Bounded experiment cases</caption><thead><tr><th>Case</th><th>Sampled known removals</th><th>Exact probability reference</th><th>Exact outcome balance</th><th>Raw research scores</th></tr></thead><tbody>{batch.cases.map((experimentCase) => <tr key={experimentCase.case_id}><th scope="row">{experimentCase.case_id}</th><td>{experimentCase.sampled_removed_ranks.join(", ") || "None"}</td><td>{experimentCase.exact_reference_status === "available" && experimentCase.exact_reference.outcomes ? `W ${probability(experimentCase.exact_reference.outcomes.win)} · P ${probability(experimentCase.exact_reference.outcomes.push)} · L ${probability(experimentCase.exact_reference.outcomes.loss)}` : `Unavailable: ${experimentCase.exact_reference.error?.message ?? "No exact result"}`}</td><td>{experimentCase.exact_outcome_balance === null ? "Unavailable" : experimentCase.exact_outcome_balance.toFixed(4)}</td><td>{experimentCase.research_results.map((score) => `${score.definition.label}: ${score.raw_score_fraction}${score.complete ? "" : " (incomplete)"}`).join(" · ")}</td></tr>)}</tbody></table></div></div>}
     </div>

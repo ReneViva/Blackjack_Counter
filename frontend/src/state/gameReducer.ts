@@ -64,5 +64,10 @@ export function gameReducer(
       return { ...state, events: state.events.slice(0, -1) };
     case "RESET":
       return createInitialState();
+    case "IMPORT_REPLAY":
+      return {
+        configuration: action.configuration,
+        events: [...action.events],
+      };
   }
 }

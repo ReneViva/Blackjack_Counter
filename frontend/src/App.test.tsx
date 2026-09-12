@@ -2,6 +2,9 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
+import { serializeSessionReplay } from "./replay/sessionReplay";
+import { gameReducer } from "./state/gameReducer";
+import { createInitialState, DEFAULT_CONFIGURATION } from "./state/initialState";
 
 function successfulHealthResponse(): Response {
   return {
@@ -62,5 +65,34 @@ describe("backend connectivity", () => {
 
     expect(await screen.findByText("Backend connected")).toBeVisible();
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("activates a backend-validated replay as one complete session", async () => {
+    const imported = gameReducer(createInitialState({
+      ...DEFAULT_CONFIGURATION,
+      rules: { ...DEFAULT_CONFIGURATION.rules, decks: 2 },
+      activeSeats: [1, 2],
+      userSeat: 2,
+    }), { type: "NEW_SHOE" });
+    const serialized = serializeSessionReplay(imported);
+    const file = { name: "replay.json", size: serialized.length, text: async () => serialized } as unknown as File;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) =>
+      url.endsWith("/health")
+        ? successfulHealthResponse()
+        : {
+            ok: true,
+            status: 200,
+            json: async () => ({ valid: true, errors: [], warnings: [] }),
+          } as Response,
+    ));
+
+    render(<App />);
+    fireEvent.change(screen.getByLabelText("Import Replay (.json)"), {
+      target: { files: [file] },
+    });
+
+    expect(await screen.findByRole("region", { name: "Observed blackjack table" })).toBeVisible();
+    expect(screen.getByText("2 decks")).toBeVisible();
+    expect(screen.getByRole("heading", { name: /Player seat 2/ })).toHaveTextContent("You");
   });
 });

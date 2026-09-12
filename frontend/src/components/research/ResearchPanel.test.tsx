@@ -130,7 +130,10 @@ function batchResponse() {
   };
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("ResearchPanel", () => {
   it("renders only the three approved primary-system selectors and bounded controls", () => {
@@ -182,6 +185,7 @@ describe("ResearchPanel", () => {
     expect(screen.getByRole("table", { name: "Computed experiment metrics" })).toHaveTextContent("undefined constant input");
     expect(screen.getByRole("table", { name: "Bounded experiment cases" })).toHaveTextContent("Unavailable: Configured limit reached.");
     expect(screen.getByText(/Pearson correlation: \+1 perfect positive/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Export Research JSON" })).toBeVisible();
   });
 
   it("validates required seed before making a request", () => {
@@ -216,5 +220,21 @@ describe("ResearchPanel", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("State is not eligible.");
     expect(screen.queryByRole("button", { name: /export|download|replay/i })).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/wager|bankroll|bet size|player action/i)).not.toBeInTheDocument();
+  });
+
+  it("downloads completed research JSON without exposing export before completion", async () => {
+    const createObjectURL = vi.fn(() => "blob:research");
+    const revokeObjectURL = vi.fn();
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(batchResponse())));
+    render(<ResearchPanel state={session()} />);
+
+    expect(screen.queryByRole("button", { name: "Export Research JSON" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Run offline experiment" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Export Research JSON" }));
+
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:research");
   });
 });

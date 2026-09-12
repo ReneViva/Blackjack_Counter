@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import { getHealth } from "./api/health";
+import ReplayControls from "./components/replay/ReplayControls";
 import SetupPage from "./pages/SetupPage";
 import TablePage from "./pages/TablePage";
 import { gameReducer } from "./state/gameReducer";
@@ -68,6 +69,15 @@ export default function App() {
           )}
         </div>
       </header>
+
+      <ReplayControls
+        state={session}
+        onActivate={(candidate) => dispatch({
+          type: "IMPORT_REPLAY",
+          configuration: candidate.configuration,
+          events: candidate.events,
+        })}
+      />
 
       {sessionStarted ? (
         <TablePage state={session} dispatch={dispatch} />

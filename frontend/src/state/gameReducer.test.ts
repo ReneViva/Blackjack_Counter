@@ -129,4 +129,15 @@ describe("frontend session and event model", () => {
     expect(selectObservedCardCount(state)).toBe(2);
     expect(selectUnknownCardCount(state)).toBe(1);
   });
+
+  it("atomically installs a validated replay and preserves undo chronology", () => {
+    const imported = gameReducer(createInitialState(), {
+      type: "IMPORT_REPLAY",
+      configuration: configuredSession,
+      events: startSession().events,
+    });
+
+    expect(imported).toEqual(startSession());
+    expect(gameReducer(imported, { type: "UNDO" }).events).toEqual([]);
+  });
 });

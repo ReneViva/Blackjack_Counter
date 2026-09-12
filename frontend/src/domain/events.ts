@@ -64,4 +64,9 @@ export type SessionAction =
   | Readonly<{ type: "UNDO" }>
   | Readonly<{ type: "RESET" }>
   | Readonly<{ type: "ROUND_COMPLETE" }>
-  | Readonly<{ type: "SHUFFLE" }>;
+  | Readonly<{ type: "SHUFFLE" }>
+  | Readonly<{
+      type: "IMPORT_REPLAY";
+      configuration: SessionConfiguration;
+      events: readonly GameEvent[];
+    }>;
