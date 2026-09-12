@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from app.api import analysis_router, validation_router
+from app.api import analysis_router, research_router, validation_router
 
 
 VITE_DEVELOPMENT_ORIGINS = (
@@ -31,6 +31,7 @@ app.add_middleware(
 )
 app.include_router(validation_router)
 app.include_router(analysis_router)
+app.include_router(research_router)
 
 
 @app.get("/api/health", response_model=HealthResponse)
