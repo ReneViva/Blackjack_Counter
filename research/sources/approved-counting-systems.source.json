@@ -1,0 +1,33 @@
+{
+  "source_id": "approved-counting-systems-2026-09-12",
+  "title": "Free Learning Path for Wong Halves, Zen Count, Omega II, Ace Side Counting, and Hi-Lo",
+  "local_path": "research/sources/approved-counting-systems.md",
+  "sha256": "343d59fc6f988e3a711ff16d184531af619774564511eaad63802cd034b91447",
+  "byte_size": 41329,
+  "supplied_by": "project owner",
+  "approval_scope": "educational research simulator",
+  "approval_date": "2026-09-12",
+  "approved_topics": [
+    "Wong Halves primary research definition",
+    "Zen Count primary research definition",
+    "Omega II primary research definition",
+    "Ace Side Counting auxiliary research concept",
+    "static research metadata directly supported by the source"
+  ],
+  "excluded_topics": [
+    "real-money wagering",
+    "betting recommendations",
+    "bet sizing",
+    "strategy deviations",
+    "index-play advice",
+    "live casino assistance",
+    "casino automation"
+  ],
+  "notes": [
+    "Project owner supplied and approved this exact local package for the stated limited scope.",
+    "This manifest does not claim instructor approval.",
+    "Hi-Lo is discussed by the source but is outside the required primary-system scope.",
+    "Strategy, betting, true-count, practice, and live-use material is not approved for executable implementation.",
+    "The archival Markdown source is preserved byte-for-byte, including its original EOF state."
+  ]
+}
