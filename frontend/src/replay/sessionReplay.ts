@@ -21,6 +21,11 @@ export type SessionReplayEnvelope = Readonly<{
   final_state: TableStatePayload;
 }>;
 
+export type SerializedSession = Readonly<{
+  configuration: SessionConfiguration;
+  events: readonly GameEvent[];
+}>;
+
 export class ReplayImportError extends Error {
   readonly code: string;
 
@@ -247,6 +252,49 @@ export function serializeSessionReplay(state: SessionState): string {
   return `${JSON.stringify(createSessionReplay(state), null, 2)}\n`;
 }
 
+export function reconstructSerializedSession(
+  value: unknown,
+  allowEmptyChronology = false,
+): SessionState {
+  const session = requireObject(value, "serialized session");
+  requireExactKeys(session, ["configuration", "events"], "serialized session");
+  const configuration = parseConfiguration(session.configuration);
+  if (!Array.isArray(session.events)) {
+    fail("invalid_replay_structure", "Session event chronology must be an array.");
+  }
+  if (session.events.length === 0) {
+    if (!allowEmptyChronology) {
+      fail("invalid_replay_structure", "Replay event chronology must be a nonempty array.");
+    }
+    return createInitialState(configuration);
+  }
+  if (!isObject(session.events[0]) || session.events[0].type !== "NEW_SHOE") {
+    fail("invalid_replay_chronology", "Session chronology must begin with NEW_SHOE.");
+  }
+
+  const firstEvent = requireObject(session.events[0], "event 1");
+  const initialConfiguration = parseConfiguration(firstEvent.configuration);
+  if (!(session.events as readonly unknown[]).some(
+    (event) => isObject(event) && event.type === "PLAYER_ADDED",
+  ) && !semanticEqual(initialConfiguration, configuration)) {
+    fail("invalid_replay_chronology", "NEW_SHOE configuration does not match the session.");
+  }
+  let candidate = createInitialState(initialConfiguration);
+  for (const [index, serializedEvent] of session.events.entries()) {
+    candidate = gameReducer(
+      candidate,
+      eventAction(serializedEvent, index, candidate.configuration),
+    );
+    if (!semanticEqual(candidate.events[index], serializedEvent)) {
+      fail("invalid_replay_chronology", `Event ${index + 1} did not replay deterministically.`);
+    }
+  }
+  if (!semanticEqual(candidate.configuration, configuration)) {
+    fail("replay_integrity_mismatch", "Session configuration did not reconstruct deterministically.");
+  }
+  return candidate;
+}
+
 export function parseSessionReplay(text: string): SessionState {
   if (new TextEncoder().encode(text).byteLength > MAX_REPLAY_BYTES) {
     fail("replay_too_large", "Replay files must not exceed 1 MiB.");
@@ -265,36 +313,7 @@ export function parseSessionReplay(text: string): SessionState {
   if (envelope.version !== REPLAY_VERSION) {
     fail("unsupported_replay_version", "Only replay version 1 is supported.");
   }
-  const session = requireObject(envelope.session, "replay session");
-  requireExactKeys(session, ["configuration", "events"], "replay session");
-  const configuration = parseConfiguration(session.configuration);
-  if (!Array.isArray(session.events) || session.events.length === 0) {
-    fail("invalid_replay_structure", "Replay event chronology must be a nonempty array.");
-  }
-  if (!isObject(session.events[0]) || session.events[0].type !== "NEW_SHOE") {
-    fail("invalid_replay_chronology", "Replay chronology must begin with NEW_SHOE.");
-  }
-
-  const firstEvent = requireObject(session.events[0], "event 1");
-  const initialConfiguration = parseConfiguration(firstEvent.configuration);
-  if (!(session.events as readonly unknown[]).some(
-    (event) => isObject(event) && event.type === "PLAYER_ADDED",
-  ) && !semanticEqual(initialConfiguration, configuration)) {
-    fail("invalid_replay_chronology", "NEW_SHOE configuration does not match the replay session.");
-  }
-  let candidate = createInitialState(initialConfiguration);
-  for (const [index, serializedEvent] of session.events.entries()) {
-    candidate = gameReducer(
-      candidate,
-      eventAction(serializedEvent, index, candidate.configuration),
-    );
-    if (!semanticEqual(candidate.events[index], serializedEvent)) {
-      fail("invalid_replay_chronology", `Event ${index + 1} did not replay deterministically.`);
-    }
-  }
-  if (!semanticEqual(candidate.configuration, configuration)) {
-    fail("replay_integrity_mismatch", "Replay session configuration did not reconstruct deterministically.");
-  }
+  const candidate = reconstructSerializedSession(envelope.session);
   if (!semanticEqual(toTableStatePayload(candidate), envelope.final_state)) {
     fail("replay_integrity_mismatch", "Replay final-state integrity check failed.");
   }

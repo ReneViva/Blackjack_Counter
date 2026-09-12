@@ -54,6 +54,8 @@ h1, h2, h3 { font-family: Georgia, "Times New Roman", serif; }
 .connection--unavailable .connection__indicator { background: var(--danger); }
 .connection strong { display: block; font-size: .82rem; }
 .connection p { margin: .2rem 0 0; color: var(--muted); font-size: .68rem; white-space: nowrap; }
+.persistence-status { display: block; margin-top: .18rem; color: #8ee2b2; font-size: .64rem; line-height: 1.2; }
+.persistence-status--warning { color: #ffb2a8; }
 .connection button { margin-left: auto; padding: .45rem .6rem; }
 
 .replay-controls { display: flex; align-items: center; position: relative; }

@@ -5,6 +5,7 @@ import App from "./App";
 import { serializeSessionReplay } from "./replay/sessionReplay";
 import { gameReducer } from "./state/gameReducer";
 import { createInitialState, DEFAULT_CONFIGURATION } from "./state/initialState";
+import { SESSION_STORAGE_KEY } from "./state/persistence";
 
 function successfulHealthResponse(): Response {
   return {
@@ -18,6 +19,7 @@ function successfulHealthResponse(): Response {
 }
 
 afterEach(() => {
+  window.localStorage.removeItem(SESSION_STORAGE_KEY);
   vi.unstubAllGlobals();
 });
 

@@ -2,8 +2,10 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import App from "../App";
+import { SESSION_STORAGE_KEY } from "../state/persistence";
 
 afterEach(() => {
+  window.localStorage.removeItem(SESSION_STORAGE_KEY);
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });

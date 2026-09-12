@@ -1,20 +1,83 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import { getHealth } from "./api/health";
+import { validateSessionState } from "./api/validation";
 import ReplayControls from "./components/replay/ReplayControls";
 import SetupPage from "./pages/SetupPage";
 import TablePage from "./pages/TablePage";
-import { gameReducer } from "./state/gameReducer";
+import { gameReducer, type SessionState } from "./state/gameReducer";
 import { createInitialState } from "./state/initialState";
+import {
+  browserSessionPersistence,
+  SessionPersistenceError,
+} from "./state/persistence";
 import "./app.css";
 
 type ConnectionState = "loading" | "connected" | "unavailable";
+type PersistenceNotice = Readonly<{
+  code: string;
+  message: string;
+  tone: "success" | "warning";
+}>;
+
+type InitialSession = Readonly<{
+  session: SessionState;
+  restored: boolean;
+  removeCorruptStorage: boolean;
+  notice: PersistenceNotice | null;
+}>;
+
+function initializeSession(): InitialSession {
+  try {
+    const restored = browserSessionPersistence.load();
+    return restored === null
+      ? {
+          session: createInitialState(),
+          restored: false,
+          removeCorruptStorage: false,
+          notice: null,
+        }
+      : {
+          session: restored,
+          restored: true,
+          removeCorruptStorage: false,
+          notice: {
+            code: "session_restored",
+            message: "Restored locally",
+            tone: "success",
+          },
+        };
+  } catch (error: unknown) {
+    const persistenceError = error instanceof SessionPersistenceError ? error : null;
+    return {
+      session: createInitialState(),
+      restored: false,
+      removeCorruptStorage: persistenceError?.definitiveCorruption ?? false,
+      notice: {
+        code: persistenceError?.code ?? "storage_load_failed",
+        message: persistenceError?.definitiveCorruption
+          ? "Saved session could not be restored"
+          : "Saved session could not be read locally",
+        tone: "warning",
+      },
+    };
+  }
+}
 
 export default function App() {
-  const [session, dispatch] = useReducer(gameReducer, undefined, createInitialState);
+  const [initialSession] = useState(initializeSession);
+  const [session, dispatch] = useReducer(gameReducer, initialSession.session);
   const [connectionState, setConnectionState] = useState<ConnectionState>("loading");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [persistenceNotice, setPersistenceNotice] = useState<PersistenceNotice | null>(
+    initialSession.notice,
+  );
   const requestController = useRef<AbortController | null>(null);
+  const corruptStorageHandled = useRef(false);
+  const lastPersistenceCandidate = useRef(session);
+  const sessionRef = useRef(session);
+  const suppressNextSave = useRef(false);
+  sessionRef.current = session;
 
   const checkConnection = useCallback(() => {
     requestController.current?.abort();
@@ -34,6 +97,74 @@ export default function App() {
     checkConnection();
     return () => requestController.current?.abort();
   }, [checkConnection]);
+
+  useEffect(() => {
+    if (!initialSession.removeCorruptStorage || corruptStorageHandled.current) return;
+    corruptStorageHandled.current = true;
+    try {
+      browserSessionPersistence.clear();
+    } catch (error: unknown) {
+      const code = error instanceof SessionPersistenceError
+        ? error.code
+        : "storage_remove_failed";
+      setPersistenceNotice({
+        code,
+        message: "Saved session could not be restored or removed",
+        tone: "warning",
+      });
+    }
+  }, [initialSession.removeCorruptStorage]);
+
+  useEffect(() => {
+    if (lastPersistenceCandidate.current === session) return;
+    lastPersistenceCandidate.current = session;
+    if (suppressNextSave.current) {
+      suppressNextSave.current = false;
+      return;
+    }
+    try {
+      browserSessionPersistence.save(session);
+      setPersistenceNotice({
+        code: "session_saved",
+        message: "Saved locally",
+        tone: "success",
+      });
+    } catch (error: unknown) {
+      setPersistenceNotice({
+        code: error instanceof SessionPersistenceError
+          ? error.code
+          : "storage_write_failed",
+        message: "Session could not be saved locally",
+        tone: "warning",
+      });
+    }
+  }, [session]);
+
+  useEffect(() => {
+    if (!initialSession.restored) return;
+    const restoredSession = initialSession.session;
+    const controller = new AbortController();
+    void validateSessionState(restoredSession, controller.signal)
+      .then((validation) => {
+        if (validation.valid || sessionRef.current !== restoredSession) return;
+        suppressNextSave.current = true;
+        try {
+          browserSessionPersistence.clear();
+        } catch {
+          // The in-memory fallback must remain usable even when storage removal fails.
+        }
+        dispatch({ type: "RESET" });
+        setPersistenceNotice({
+          code: validation.errors[0]?.code ?? "backend_invalid_persistence",
+          message: "Saved session could not be restored",
+          tone: "warning",
+        });
+      })
+      .catch(() => {
+        // A backend outage never invalidates locally reconstructed chronology.
+      });
+    return () => controller.abort();
+  }, [initialSession]);
 
   const sessionStarted = session.events.some((event) => event.type === "NEW_SHOE");
 
@@ -61,6 +192,15 @@ export default function App() {
                 {connectionState === "connected" && (sessionStarted ? "Backend connected · Analysis current" : "Backend connected · Create a hand or import a session")}
                 {connectionState === "unavailable" && "Backend unavailable"}
               </p>
+              {persistenceNotice && (
+                <small
+                  aria-live="polite"
+                  className={`persistence-status persistence-status--${persistenceNotice.tone}`}
+                  data-persistence-code={persistenceNotice.code}
+                >
+                  {persistenceNotice.message}
+                </small>
+              )}
             </div>
             {connectionState === "unavailable" && <button type="button" className="button-secondary" aria-label="Retry connection" onClick={checkConnection}>Retry</button>}
           </div>
