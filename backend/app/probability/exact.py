@@ -14,9 +14,17 @@ from .distribution import OutcomeDistribution, weighted_sum
 from .memoization import CacheMetrics, CanonicalKey, canonical_round_key
 
 
-_RANK_CARDS: dict[Rank, tuple[Card, ...]] = {
-    rank: tuple(card for card in ALL_CARDS if card.rank is rank) for rank in Rank
-}
+_RANK_DRAW_SLOTS: tuple[tuple[Rank, tuple[tuple[int, Card], ...]], ...] = tuple(
+    (
+        rank,
+        tuple(
+            (index, card)
+            for index, card in enumerate(ALL_CARDS)
+            if card.rank is rank
+        ),
+    )
+    for rank in Rank
+)
 
 
 class ExactAnalysisError(ValueError):
@@ -81,12 +89,12 @@ def possible_draws(shoe: Shoe) -> tuple[PossibleDraw, ...]:
         return ()
 
     draws: list[PossibleDraw] = []
-    for rank in Rank:
-        cards = _RANK_CARDS[rank]
-        count = sum(shoe.count(card) for card in cards)
+    counts = shoe.card_counts
+    for rank, slots in _RANK_DRAW_SLOTS:
+        count = sum(counts[index] for index, _ in slots)
         if count == 0:
             continue
-        representative = next(card for card in cards if shoe.count(card) > 0)
+        representative = next(card for index, card in slots if counts[index] > 0)
         draws.append(
             PossibleDraw(
                 rank=rank,
