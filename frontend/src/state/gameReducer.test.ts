@@ -77,7 +77,7 @@ describe("frontend session and event model", () => {
     });
 
     const table = selectTableState(state);
-    expect(table.playerCards[2]).toEqual([
+    expect(table.playerHands[2][0].cards).toEqual([
       { kind: "known", rank: "K", suit: "hearts" },
     ]);
     expect(table.dealerCards).toEqual([{ kind: "unknown" }]);
@@ -141,7 +141,7 @@ describe("frontend session and event model", () => {
 
     const table = selectTableState(state);
     expect(table.dealerCards).toEqual([]);
-    expect(table.playerCards[2]).toEqual([]);
+    expect(table.playerHands[2][0].cards).toEqual([]);
     expect(table.discardedCards).toEqual([
       { kind: "unknown" },
       { kind: "known", rank: "Q", suit: "diamonds" },

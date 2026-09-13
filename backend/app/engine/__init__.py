@@ -5,6 +5,7 @@ from .rule_engine import (
     DealerAction,
     dealer_action,
     player_action_decision,
+    split_action_decision,
 )
 from .shoe_builder import StateReconstructionError, build_shoe
 from .state_builder import (
@@ -23,6 +24,7 @@ from .transition_engine import (
     draw_transition,
     player_double,
     player_hit,
+    observe_split_replacement,
     player_split,
     player_stand,
     player_surrender,
@@ -64,8 +66,10 @@ __all__ = [
     "evaluate_hand",
     "evaluate_dealer",
     "player_action_decision",
+    "split_action_decision",
     "player_double",
     "player_hit",
+    "observe_split_replacement",
     "player_split",
     "player_stand",
     "player_surrender",

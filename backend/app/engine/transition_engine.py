@@ -19,6 +19,8 @@ from app.domain import (
     RoundState,
     Shoe,
     UnknownCard,
+    initial_hand_id,
+    split_child_hand_ids,
 )
 
 from .dealer_engine import DealerStatus, evaluate_dealer
@@ -234,7 +236,12 @@ def _initial_hand_state(seat: int, hand: Hand) -> PlayerHandState:
         status = HandStatus.STOOD
     else:
         status = HandStatus.ACTIVE
-    return PlayerHandState(seat=seat, hand=hand, status=status)
+    return PlayerHandState(
+        seat=seat,
+        hand=hand,
+        status=status,
+        hand_id=initial_hand_id(seat),
+    )
 
 
 def _dealer_check_required(state: GameState) -> bool:
@@ -555,8 +562,6 @@ def _split_child_status(
 
 def player_split(
     state: RoundState,
-    left_draw: ObservedCard,
-    right_draw: ObservedCard,
 ) -> RoundState:
     index = _require_player_action(state, PlayerAction.SPLIT)
     parent = state.player_hands[index]
@@ -564,48 +569,74 @@ def player_split(
     assert isinstance(left_card, Card) and isinstance(right_card, Card)
     depth = parent.split_depth + 1
     split_aces = left_card.rank is Rank.ACE
+    assert parent.hand_id is not None
+    left_id, right_id = split_child_hand_ids(parent.hand_id)
     left = PlayerHandState(
         seat=parent.seat,
-        hand=Hand(cards=(left_card, left_draw)),
+        hand=Hand(cards=(left_card,)),
         split_depth=depth,
         from_split_aces=parent.from_split_aces or split_aces,
+        hand_id=left_id,
+        parent_hand_id=parent.hand_id,
     )
     right = PlayerHandState(
         seat=parent.seat,
-        hand=Hand(cards=(right_card, right_draw)),
+        hand=Hand(cards=(right_card,)),
         split_depth=depth,
         from_split_aces=parent.from_split_aces or split_aces,
+        hand_id=right_id,
+        parent_hand_id=parent.hand_id,
     )
-    new_seat_count = sum(
-        hand.seat == parent.seat for hand in state.player_hands
-    ) + 1
-    left = replace(left, status=_split_child_status(state, left, new_seat_count))
-    right = replace(right, status=_split_child_status(state, right, new_seat_count))
     hands = (
         *state.player_hands[:index],
         left,
         right,
         *state.player_hands[index + 1 :],
     )
-    if split_aces and not state.game_state.rules.hit_split_aces:
-        seat_count = sum(hand.seat == parent.seat for hand in hands)
-        if seat_count >= state.game_state.rules.max_split_hands:
-            hands = tuple(
-                replace(hand, status=HandStatus.STOOD)
-                if (
-                    hand.seat == parent.seat
-                    and hand.from_split_aces
-                    and hand.status is HandStatus.ACTIVE
-                )
-                else hand
-                for hand in hands
-            )
-    shoe = _remove_observed_card(state.game_state.shoe, left_draw)
-    shoe = _remove_observed_card(shoe, right_draw)
-    result = _with_player_hands(state, hands, shoe)
-    if left.status is HandStatus.ACTIVE:
-        return replace(result, active_hand_index=index)
-    return _advance_after_terminal(result, index)
+    return replace(_with_player_hands(state, hands), active_hand_index=index)
+
+
+def observe_split_replacement(
+    state: RoundState,
+    hand_id: str,
+    card: ObservedCard,
+) -> RoundState:
+    """Record one manually observed replacement card after a split."""
+    _validate_round_source(state)
+    matches = [
+        index
+        for index, player in enumerate(state.player_hands)
+        if player.hand_id == hand_id
+    ]
+    if len(matches) != 1:
+        raise TransitionError(
+            "invalid_hand_target", "The selected split hand does not exist."
+        )
+    index = matches[0]
+    player = state.player_hands[index]
+    if player.split_depth < 1 or len(player.hand.cards) != 1:
+        raise TransitionError(
+            "replacement_not_expected",
+            "This hand is not waiting for a split replacement observation.",
+        )
+    updated = replace(player, hand=_append_card(player.hand, card))
+    seat_hand_count = sum(
+        hand.seat == player.seat for hand in state.player_hands
+    )
+    updated = replace(
+        updated,
+        status=_split_child_status(state, updated, seat_hand_count),
+    )
+    hands = list(state.player_hands)
+    hands[index] = updated
+    result = _with_player_hands(
+        state,
+        tuple(hands),
+        _remove_observed_card(state.game_state.shoe, card),
+    )
+    if index == state.active_hand_index and updated.status is not HandStatus.ACTIVE:
+        return _advance_after_terminal(result, index)
+    return result
 
 
 def advance_dealer(

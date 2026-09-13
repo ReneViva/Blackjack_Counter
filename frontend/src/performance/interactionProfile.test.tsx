@@ -41,7 +41,7 @@ describe("direct-manipulation performance contract", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Dealer" }));
     await new Promise((resolve) => window.setTimeout(resolve, 260));
-    expect(fetchMock.mock.calls.filter(([input]) => !String(input).endsWith("/health"))).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([input]) => /\/(analyze|research)\//.test(String(input)))).toHaveLength(1);
     expect(setItemSpy).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("button", { name: /Seat 4, occupied, primary hand/ }));

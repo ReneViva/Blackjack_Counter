@@ -5,6 +5,14 @@ from .hand import Hand
 from .state import GameState
 
 
+def initial_hand_id(seat: int) -> str:
+    return f"seat-{seat}-hand-1"
+
+
+def split_child_hand_ids(parent_hand_id: str) -> tuple[str, str]:
+    return (f"{parent_hand_id}-1", f"{parent_hand_id}-2")
+
+
 class RoundPhase(str, Enum):
     DEALER_CHECK = "dealer_check"
     PLAYER_TURNS = "player_turns"
@@ -44,6 +52,8 @@ class PlayerHandState:
     from_split_aces: bool = False
     decision_count: int = 0
     doubled: bool = False
+    hand_id: str | None = None
+    parent_hand_id: str | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.seat, bool) or not isinstance(self.seat, int):
@@ -68,6 +78,14 @@ class PlayerHandState:
             raise ValueError("decision_count cannot be negative")
         if not isinstance(self.doubled, bool):
             raise TypeError("doubled must be a boolean")
+        if self.hand_id is None:
+            object.__setattr__(self, "hand_id", initial_hand_id(self.seat))
+        elif not isinstance(self.hand_id, str) or not self.hand_id:
+            raise TypeError("hand_id must be a non-empty string or None")
+        if self.parent_hand_id is not None and (
+            not isinstance(self.parent_hand_id, str) or not self.parent_hand_id
+        ):
+            raise TypeError("parent_hand_id must be a non-empty string or None")
 
 
 @dataclass(frozen=True, slots=True)

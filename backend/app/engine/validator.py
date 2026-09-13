@@ -127,17 +127,58 @@ def validate_table_state(state: ReconstructedTableState) -> ValidationResult:
                     field="players",
                 )
             )
-    duplicate_seats = sorted(
-        seat for seat, count in Counter(seats).items() if count > 1
+    duplicate_hand_ids = sorted(
+        hand_id
+        for hand_id, count in Counter(player.hand_id for player in state.players).items()
+        if count > 1
     )
-    for seat in duplicate_seats:
+    for hand_id in duplicate_hand_ids:
         errors.append(
             ValidationIssue(
                 code="duplicate_seat",
-                message=f"Seat {seat} appears more than once.",
+                message=(
+                    f"Player hand identity {hand_id} appears more than once; "
+                    "multiple hands at one seat require distinct identities."
+                ),
                 field="players",
             )
         )
+
+    for seat, count in Counter(seats).items():
+        if count > state.max_split_hands:
+            errors.append(
+                ValidationIssue(
+                    code="split_hand_limit_exceeded",
+                    message=f"Seat {seat} exceeds the configured maximum hand count.",
+                    field="players",
+                )
+            )
+
+    for player in state.players:
+        if player.split_depth == 0 and player.parent_hand_id is not None:
+            errors.append(
+                ValidationIssue(
+                    code="invalid_split_lineage",
+                    message="An initial hand cannot identify a split parent.",
+                    field="players",
+                )
+            )
+        if player.split_depth > 0 and player.parent_hand_id is None:
+            errors.append(
+                ValidationIssue(
+                    code="invalid_split_lineage",
+                    message="A split hand must identify its parent hand.",
+                    field="players",
+                )
+            )
+        if player.from_split_aces and player.split_depth == 0:
+            errors.append(
+                ValidationIssue(
+                    code="invalid_split_lineage",
+                    message="Split-Ace state requires positive split depth.",
+                    field="players",
+                )
+            )
 
     user_seats = [player.seat for player in state.players if player.is_user]
     if len(user_seats) > 1:
@@ -253,6 +294,32 @@ def validate_round_state(state: RoundState) -> ValidationResult:
                 ValidationIssue(
                     code="seat_out_of_range",
                     message=f"Seat {player.seat} must be between 1 and 7.",
+                    field="player_hands",
+                )
+            )
+    hand_ids = [player.hand_id for player in state.player_hands]
+    if len(hand_ids) != len(set(hand_ids)):
+        errors.append(
+            ValidationIssue(
+                code="duplicate_hand_id",
+                message="Runtime player hand identities must be unique.",
+                field="player_hands",
+            )
+        )
+    for player in state.player_hands:
+        if player.split_depth == 0 and player.parent_hand_id is not None:
+            errors.append(
+                ValidationIssue(
+                    code="invalid_split_lineage",
+                    message="An initial hand cannot identify a split parent.",
+                    field="player_hands",
+                )
+            )
+        if player.split_depth > 0 and player.parent_hand_id is None:
+            errors.append(
+                ValidationIssue(
+                    code="invalid_split_lineage",
+                    message="A split hand must identify its parent hand.",
                     field="player_hands",
                 )
             )

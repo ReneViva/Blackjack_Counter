@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
+from typing import Protocol
 
 from app.domain import (
     Card,
@@ -7,6 +8,7 @@ from app.domain import (
     DealerSoft17,
     HandStatus,
     PlayerAction,
+    PlayerHandState,
     Rank,
     RoundPhase,
     RoundState,
@@ -32,6 +34,56 @@ class ActionDecision:
 
 def _reject(code: str, message: str) -> ActionDecision:
     return ActionDecision(allowed=False, code=code, message=message)
+
+
+class SplitRules(Protocol):
+    splitting_enabled: bool
+    max_split_hands: int
+    resplit_aces: bool
+
+
+def split_action_decision(
+    rules: SplitRules,
+    player: PlayerHandState,
+    seat_hand_count: int,
+) -> ActionDecision:
+    if not rules.splitting_enabled:
+        return _reject(
+            "splitting_disabled",
+            "Splitting is disabled by the current rules.",
+        )
+    if player.decision_count != 0:
+        return _reject(
+            "split_after_decision",
+            "Splitting is only allowed before another hand decision.",
+        )
+    cards = player.hand.cards
+    known_pair = (
+        len(cards) == 2
+        and all(isinstance(card, Card) for card in cards)
+        and cards[0].rank is cards[1].rank
+    )
+    if not known_pair:
+        return _reject(
+            "exact_pair_required",
+            "Splitting requires two known cards of the same exact rank.",
+        )
+    if seat_hand_count >= rules.max_split_hands:
+        return _reject(
+            "split_limit_reached",
+            "The seat has reached its maximum number of split hands.",
+        )
+    assert isinstance(cards[0], Card)
+    if (
+        cards[0].rank is Rank.ACE
+        and player.split_depth > 0
+        and not rules.resplit_aces
+    ):
+        return _reject(
+            "resplit_aces_not_allowed",
+            "The configured rules do not allow resplitting Aces.",
+        )
+    return ActionDecision(allowed=True)
 
 
 def player_action_decision(
@@ -67,40 +119,13 @@ def player_action_decision(
 
     rules = state.game_state.rules
     cards = player.hand.cards
-    known_pair = (
-        len(cards) == 2
-        and all(isinstance(card, Card) for card in cards)
-        and cards[0].rank is cards[1].rank
-    )
     split_ace_lock = player.from_split_aces and not rules.hit_split_aces
 
     if action is PlayerAction.SPLIT:
-        if not rules.splitting_enabled or player.decision_count != 0:
-            return _reject("split_not_allowed", "Splitting is not allowed.")
-        if not known_pair:
-            return _reject(
-                "split_not_allowed",
-                "Splitting requires two known cards of the same rank.",
-            )
         seat_hand_count = sum(
             hand.seat == player.seat for hand in state.player_hands
         )
-        if seat_hand_count >= rules.max_split_hands:
-            return _reject(
-                "split_limit_reached",
-                "The seat has reached its maximum number of split hands.",
-            )
-        assert isinstance(cards[0], Card)
-        if (
-            cards[0].rank is Rank.ACE
-            and player.split_depth > 0
-            and not rules.resplit_aces
-        ):
-            return _reject(
-                "resplit_aces_not_allowed",
-                "The configured rules do not allow resplitting Aces.",
-            )
-        return ActionDecision(allowed=True)
+        return split_action_decision(rules, player, seat_hand_count)
 
     if split_ace_lock:
         return _reject(

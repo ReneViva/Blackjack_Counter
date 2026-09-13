@@ -14,6 +14,20 @@ class ValidationResponse(BaseModel):
     warnings: list[APIErrorDetail] = Field(default_factory=list)
 
 
+class LegalActionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    allowed: bool
+    code: str | None = None
+    reason: str | None = None
+
+
+class PlayerActionsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    split: LegalActionResponse
+
+
 class OutcomeProbabilities(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

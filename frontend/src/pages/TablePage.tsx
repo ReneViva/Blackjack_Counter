@@ -6,8 +6,14 @@ import CardPicker from "../components/cards/CardPicker";
 import ResearchPanel from "../components/research/ResearchPanel";
 import BlackjackTable from "../components/table/BlackjackTable";
 import EventHistory from "../components/table/EventHistory";
+import PlayerActions from "../components/table/PlayerActions";
+import {
+  getPlayerActions,
+  type LegalAction,
+} from "../api/playerActions";
 import type { SessionAction, TableTarget } from "../domain/events";
 import type { SessionState } from "../state/gameReducer";
+import { splitChildHandIds } from "../domain/hands";
 import { selectTableState } from "../state/selectors";
 
 type TablePageProps = Readonly<{
@@ -17,20 +23,66 @@ type TablePageProps = Readonly<{
 
 export default function TablePage({ dispatch, state }: TablePageProps) {
   const [activeTarget, setActiveTarget] = useState<TableTarget | null>(null);
+  const [legalityResult, setLegalityResult] = useState<Readonly<{
+    action: LegalAction;
+    handId: string;
+    seat: number;
+    state: SessionState;
+  }> | null>(null);
   const table = selectTableState(state);
   const sessionStarted = state.events.some((event) => event.type === "NEW_SHOE");
+  const splitLegality = activeTarget?.kind === "player-hand" &&
+      legalityResult?.state === state &&
+      legalityResult.seat === activeTarget.seat &&
+      legalityResult.handId === activeTarget.handId
+    ? legalityResult.action
+    : null;
+  const legalityLoading = activeTarget?.kind === "player-hand" &&
+    splitLegality === null;
 
   useEffect(() => {
-    if (activeTarget?.kind === "player" &&
-        !state.configuration.activeSeats.includes(activeTarget.seat)) {
+    if (activeTarget?.kind === "player-hand" &&
+        !table.playerHands[activeTarget.seat].some(
+          (hand) => hand.handId === activeTarget.handId,
+        )) {
       setActiveTarget(null);
     }
-  }, [activeTarget, state.configuration.activeSeats]);
+  }, [activeTarget, table.playerHands]);
+
+  useEffect(() => {
+    if (activeTarget?.kind !== "player-hand") {
+      setLegalityResult(null);
+      return;
+    }
+    const controller = new AbortController();
+    const target = activeTarget;
+    void getPlayerActions(state, activeTarget, controller.signal)
+      .then((actions) => setLegalityResult({
+        action: actions.split,
+        handId: target.handId,
+        seat: target.seat,
+        state,
+      }))
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setLegalityResult({
+          action: {
+            allowed: false,
+            code: "backend_unavailable",
+            reason: "Python split eligibility is unavailable.",
+          },
+          handId: target.handId,
+          seat: target.seat,
+          state,
+        });
+      });
+    return () => controller.abort();
+  }, [activeTarget, state]);
 
   return (
     <div className="table-page">
       <section className="primary-workspace" aria-label="Blackjack probability workspace">
-        <AnalysisSidebar state={state} />
+        <AnalysisSidebar activeTarget={activeTarget} state={state} />
 
         <section className="table-workspace" aria-label="Blackjack table workspace">
           <BlackjackTable
@@ -38,12 +90,54 @@ export default function TablePage({ dispatch, state }: TablePageProps) {
             activeTarget={activeTarget}
             onAddPlayer={(seat) => {
               dispatch({ type: "ADD_PLAYER", seat });
-              setActiveTarget({ kind: "player", seat });
+              setActiveTarget({
+                kind: "player-hand",
+                seat,
+                handId: `seat-${seat}-hand-1`,
+              });
             }}
             onSelectTarget={setActiveTarget}
             table={table}
             userSeat={state.configuration.userSeat}
           />
+
+          {activeTarget?.kind === "player-hand" && (
+            <PlayerActions
+              target={activeTarget}
+              split={splitLegality}
+              loading={legalityLoading}
+              onSplit={() => {
+                if (!splitLegality?.allowed) return;
+                const source = table.playerHands[activeTarget.seat].find(
+                  (hand) => hand.handId === activeTarget.handId,
+                );
+                if (!source) return;
+                const [leftHandId, rightHandId] = splitChildHandIds(source.handId);
+                const fromSplitAces = source.fromSplitAces || (
+                  source.cards[0]?.kind === "known" &&
+                  source.cards[0].rank === "A"
+                );
+                dispatch({
+                  type: "SPLIT_PLAYER_HAND",
+                  seat: activeTarget.seat,
+                  handId: source.handId,
+                  leftHandId,
+                  rightHandId,
+                  splitDepth: source.splitDepth + 1,
+                  fromSplitAces,
+                });
+                setActiveTarget({
+                  kind: "player-hand",
+                  seat: activeTarget.seat,
+                  handId: leftHandId,
+                });
+              }}
+              onLeave={() => {
+                dispatch({ type: "LEAVE_PLAYER", seat: activeTarget.seat });
+                setActiveTarget(null);
+              }}
+            />
+          )}
 
           <div className="table-control-strip" aria-label="Table session controls">
             <div>

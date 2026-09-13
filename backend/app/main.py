@@ -4,7 +4,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from app.api import analysis_router, research_router, validation_router
+from app.api import (
+    analysis_router,
+    player_actions_router,
+    research_router,
+    validation_router,
+)
 
 
 VITE_DEVELOPMENT_ORIGINS = (
@@ -30,6 +35,7 @@ app.add_middleware(
     allow_headers=["Accept", "Content-Type"],
 )
 app.include_router(validation_router)
+app.include_router(player_actions_router)
 app.include_router(analysis_router)
 app.include_router(research_router)
 

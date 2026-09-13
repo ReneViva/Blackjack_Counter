@@ -72,7 +72,7 @@ function validationResponse(valid = true): Response {
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("session replay version 1", () => {
+describe("versioned session replay", () => {
   it("exports the fixed format, version, configuration, chronology, and final state", () => {
     const state = nontrivialSession();
     const replay = createSessionReplay(state);
@@ -161,7 +161,7 @@ describe("session replay version 1", () => {
     expectReplayError(replay, format === undefined ? "invalid_replay_structure" : code);
   });
 
-  it.each([undefined, 2, "1", true])("rejects missing or unsupported version %#", (version) => {
+  it.each([undefined, 3, "1", true])("rejects missing or unsupported version %#", (version) => {
     const replay = replayObject();
     if (version === undefined) delete replay.version; else replay.version = version;
     expectReplayError(replay, version === undefined ? "invalid_replay_structure" : "unsupported_replay_version");

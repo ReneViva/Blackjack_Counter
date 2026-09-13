@@ -95,7 +95,7 @@ describe("versioned session persistence", () => {
     expect(restored).toEqual(state);
     expect(restored.configuration.activeSeats).toEqual([4]);
     expect(restored.configuration.userSeat).toBe(4);
-    expect(selectTableState(restored).playerCards[4]).toEqual([
+    expect(selectTableState(restored).playerHands[4][0].cards).toEqual([
       { kind: "known", rank: "8", suit: "hearts" },
       { kind: "known", rank: "6", suit: "spades" },
     ]);
@@ -171,7 +171,7 @@ describe("strict persistence parsing", () => {
       "invalid_persistence_format",
     );
     expectPersistenceCode(
-      () => parsePersistedSession(JSON.stringify({ ...envelope, version: 2 })),
+      () => parsePersistedSession(JSON.stringify({ ...envelope, version: 3 })),
       "unsupported_persistence_version",
     );
   });

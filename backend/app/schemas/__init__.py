@@ -6,6 +6,8 @@ from .requests import (
     ExactAnalysisOptions,
     ExactAnalysisRequest,
     MonteCarloAnalysisOptions,
+    PlayerActionsRequest,
+    PlayerHandTargetSchema,
 )
 from .research import (
     AceInformationResponse,
@@ -46,6 +48,8 @@ from .responses import (
     OutcomeProbabilities,
     ScenarioAssumptionsResponse,
     ValidationResponse,
+    LegalActionResponse,
+    PlayerActionsResponse,
 )
 from .rules import RulesSchema
 from .table import HandSchema, PlayerHandSchema, TableStateSchema
@@ -72,6 +76,8 @@ __all__ = [
     "EstimatedOutcome",
     "KnownCardSchema",
     "MonteCarloAnalysisOptions",
+    "PlayerActionsRequest",
+    "PlayerHandTargetSchema",
     "MonteCarloAnalysisResponse",
     "MonteCarloOutcomes",
     "MonteCarloScenarioAnalysisResponse",
@@ -100,4 +106,6 @@ __all__ = [
     "TableStateSchema",
     "UnknownCardSchema",
     "ValidationResponse",
+    "LegalActionResponse",
+    "PlayerActionsResponse",
 ]

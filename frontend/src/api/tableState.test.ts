@@ -53,10 +53,22 @@ describe("table-state transport contract", () => {
         ],
       },
       players: [
-        { seat: 1, is_user: false, cards: [] },
+        {
+          seat: 1,
+          is_user: false,
+          hand_id: "seat-1-hand-1",
+          parent_hand_id: null,
+          split_depth: 0,
+          from_split_aces: false,
+          cards: [],
+        },
         {
           seat: 3,
           is_user: true,
+          hand_id: "seat-3-hand-1",
+          parent_hand_id: null,
+          split_depth: 0,
+          from_split_aces: false,
           cards: [{ kind: "known", rank: "A", suit: "S" }],
         },
       ],

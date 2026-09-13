@@ -65,7 +65,7 @@ describe("direct-manipulation table flow", () => {
     expect(screen.getByLabelText("Seat 4 observed cards")).toHaveTextContent("8");
 
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
-    expect(screen.getByLabelText("Seat 4 observed cards")).toBeEmptyDOMElement();
+    expect(screen.getByLabelText("Seat 4 observed cards")).toHaveTextContent("No cards");
   });
 
   it("keeps rules in compact settings and preserves advanced analysis access", () => {

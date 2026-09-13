@@ -36,8 +36,11 @@ export default function BlackjackTable({
         </div>
         {SEAT_NUMBERS.map((seat) => (
           <PlayerSeat
-            active={activeTarget?.kind === "player" && activeTarget.seat === seat}
-            cards={table.playerCards[seat]}
+            activeHandId={activeTarget?.kind === "player-hand" &&
+                activeTarget.seat === seat
+              ? activeTarget.handId
+              : null}
+            hands={table.playerHands[seat]}
             isOccupied={activeSeats.includes(seat)}
             isUser={seat === userSeat}
             key={seat}

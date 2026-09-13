@@ -10,17 +10,25 @@ function describeEvent(event: GameEvent): string {
       return "New shoe started";
     case "PLAYER_ADDED":
       return `Player added at seat ${event.seat}`;
+    case "PLAYER_HAND_SPLIT":
+      return `Seat ${event.seat} split ${event.sourceHandId} into two hands`;
+    case "PLAYER_LEFT":
+      return `Player left seat ${event.seat}`;
     case "DEAL_KNOWN_CARD": {
       const target =
         event.target.kind === "dealer"
           ? "Dealer"
-          : `Player seat ${event.target.seat}`;
+          : event.target.kind === "player-hand"
+            ? `Player seat ${event.target.seat}, hand ${event.target.handId}`
+            : `Player seat ${event.target.seat}`;
       return `${target} observed ${event.card.rank} of ${event.card.suit}`;
     }
     case "DEAL_UNKNOWN_CARD":
       return event.target.kind === "dealer"
         ? "Dealer observed an unknown card"
-        : `Player seat ${event.target.seat} observed an unknown card`;
+        : event.target.kind === "player-hand"
+          ? `Player seat ${event.target.seat}, hand ${event.target.handId} observed an unknown card`
+          : `Player seat ${event.target.seat} observed an unknown card`;
     case "ROUND_COMPLETE":
       return "Round marked complete";
     case "SHUFFLE":

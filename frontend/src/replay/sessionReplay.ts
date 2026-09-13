@@ -1,14 +1,18 @@
 import { RANKS, SUITS, type KnownCard, type Rank, type Suit } from "../domain/card";
-import type { GameEvent, SessionAction, TableTarget } from "../domain/events";
+import type { GameEvent, RecordedTableTarget, SessionAction } from "../domain/events";
 import { SEAT_NUMBERS, type SeatNumber, type SessionConfiguration } from "../domain/game";
 import { DECK_COUNTS, type DeckCount, type SessionRules } from "../domain/rules";
 import { validateSessionState, ValidationApiError } from "../api/validation";
-import { toTableStatePayload, type TableStatePayload } from "../api/tableState";
+import {
+  toLegacyTableStatePayload,
+  toTableStatePayload,
+  type TableStatePayload,
+} from "../api/tableState";
 import { gameReducer, type SessionState } from "../state/gameReducer";
 import { createInitialState } from "../state/initialState";
 
 export const REPLAY_FORMAT = "blackjack-session-replay" as const;
-export const REPLAY_VERSION = 1 as const;
+export const REPLAY_VERSION = 2 as const;
 export const MAX_REPLAY_BYTES = 1024 * 1024;
 
 export type SessionReplayEnvelope = Readonly<{
@@ -136,7 +140,10 @@ function parseConfiguration(value: unknown): SessionConfiguration {
   };
 }
 
-function parseTarget(value: unknown, configuration: SessionConfiguration): TableTarget {
+function parseTarget(
+  value: unknown,
+  configuration: SessionConfiguration,
+): RecordedTableTarget {
   const target = requireObject(value, "event target");
   if (target.kind === "dealer") {
     requireExactKeys(target, ["kind"], "dealer target");
@@ -148,6 +155,19 @@ function parseTarget(value: unknown, configuration: SessionConfiguration): Table
       fail("invalid_replay_event", "A player event targets an inactive or invalid seat.");
     }
     return { kind: "player", seat: target.seat };
+  }
+  if (target.kind === "player-hand") {
+    requireExactKeys(target, ["kind", "seat", "handId"], "player-hand target");
+    if (!isSeat(target.seat) ||
+        !configuration.activeSeats.includes(target.seat) ||
+        typeof target.handId !== "string" || target.handId.length === 0) {
+      fail("invalid_replay_event", "A hand event targets an inactive or invalid player hand.");
+    }
+    return {
+      kind: "player-hand",
+      seat: target.seat,
+      handId: target.handId,
+    };
   }
   return fail("invalid_replay_event", "Event target kind is unsupported.");
 }
@@ -175,6 +195,7 @@ function eventAction(
   value: unknown,
   index: number,
   configuration: SessionConfiguration,
+  version: 1 | 2,
 ): SessionAction {
   const event = requireObject(value, `event ${index + 1}`);
   if (typeof event.type !== "string") {
@@ -196,6 +217,48 @@ function eventAction(
         fail("invalid_replay_event", "A player-add event must target an inactive supported seat.");
       }
       return { type: "ADD_PLAYER", seat: event.seat };
+    case "PLAYER_LEFT":
+      if (version === 1) {
+        fail("unsupported_replay_event", "PLAYER_LEFT requires replay version 2.");
+      }
+      requireExactKeys(event, ["id", "sequence", "type", "seat"], "PLAYER_LEFT event");
+      if (!isSeat(event.seat) || !configuration.activeSeats.includes(event.seat)) {
+        fail("invalid_replay_event", "A player-leave event must target an active supported seat.");
+      }
+      return { type: "LEAVE_PLAYER", seat: event.seat };
+    case "PLAYER_HAND_SPLIT":
+      if (version === 1) {
+        fail("unsupported_replay_event", "PLAYER_HAND_SPLIT requires replay version 2.");
+      }
+      requireExactKeys(event, [
+        "id",
+        "sequence",
+        "type",
+        "seat",
+        "sourceHandId",
+        "leftHandId",
+        "rightHandId",
+        "splitDepth",
+        "fromSplitAces",
+      ], "PLAYER_HAND_SPLIT event");
+      if (!isSeat(event.seat) ||
+          !configuration.activeSeats.includes(event.seat) ||
+          typeof event.sourceHandId !== "string" || !event.sourceHandId ||
+          typeof event.leftHandId !== "string" || !event.leftHandId ||
+          typeof event.rightHandId !== "string" || !event.rightHandId ||
+          !Number.isInteger(event.splitDepth) || (event.splitDepth as number) < 1 ||
+          typeof event.fromSplitAces !== "boolean") {
+        fail("invalid_replay_event", "A split event contains invalid hand metadata.");
+      }
+      return {
+        type: "SPLIT_PLAYER_HAND",
+        seat: event.seat,
+        handId: event.sourceHandId,
+        leftHandId: event.leftHandId,
+        rightHandId: event.rightHandId,
+        splitDepth: event.splitDepth as number,
+        fromSplitAces: event.fromSplitAces,
+      };
     case "DEAL_KNOWN_CARD":
       requireExactKeys(event, ["id", "sequence", "type", "target", "card"], "DEAL_KNOWN_CARD event");
       return {
@@ -255,6 +318,7 @@ export function serializeSessionReplay(state: SessionState): string {
 export function reconstructSerializedSession(
   value: unknown,
   allowEmptyChronology = false,
+  version: 1 | 2 = REPLAY_VERSION,
 ): SessionState {
   const session = requireObject(value, "serialized session");
   requireExactKeys(session, ["configuration", "events"], "serialized session");
@@ -274,16 +338,18 @@ export function reconstructSerializedSession(
 
   const firstEvent = requireObject(session.events[0], "event 1");
   const initialConfiguration = parseConfiguration(firstEvent.configuration);
-  if (!(session.events as readonly unknown[]).some(
-    (event) => isObject(event) && event.type === "PLAYER_ADDED",
-  ) && !semanticEqual(initialConfiguration, configuration)) {
+  const hasDynamicPlayerEvent = (session.events as readonly unknown[]).some(
+    (event) => isObject(event) &&
+      (event.type === "PLAYER_ADDED" || event.type === "PLAYER_LEFT"),
+  );
+  if (!hasDynamicPlayerEvent && !semanticEqual(initialConfiguration, configuration)) {
     fail("invalid_replay_chronology", "NEW_SHOE configuration does not match the session.");
   }
   let candidate = createInitialState(initialConfiguration);
   for (const [index, serializedEvent] of session.events.entries()) {
     candidate = gameReducer(
       candidate,
-      eventAction(serializedEvent, index, candidate.configuration),
+      eventAction(serializedEvent, index, candidate.configuration, version),
     );
     if (!semanticEqual(candidate.events[index], serializedEvent)) {
       fail("invalid_replay_chronology", `Event ${index + 1} did not replay deterministically.`);
@@ -310,11 +376,15 @@ export function parseSessionReplay(text: string): SessionState {
   if (envelope.format !== REPLAY_FORMAT) {
     fail("invalid_replay_format", `Replay format must be ${REPLAY_FORMAT}.`);
   }
-  if (envelope.version !== REPLAY_VERSION) {
-    fail("unsupported_replay_version", "Only replay version 1 is supported.");
+  if (envelope.version !== 1 && envelope.version !== REPLAY_VERSION) {
+    fail("unsupported_replay_version", "Only replay versions 1 and 2 are supported.");
   }
-  const candidate = reconstructSerializedSession(envelope.session);
-  if (!semanticEqual(toTableStatePayload(candidate), envelope.final_state)) {
+  const version = envelope.version as 1 | 2;
+  const candidate = reconstructSerializedSession(envelope.session, false, version);
+  const finalState = version === 1
+    ? toLegacyTableStatePayload(candidate)
+    : toTableStatePayload(candidate);
+  if (!semanticEqual(finalState, envelope.final_state)) {
     fail("replay_integrity_mismatch", "Replay final-state integrity check failed.");
   }
   return candidate;

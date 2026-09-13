@@ -29,6 +29,7 @@ from app.engine import (
     advance_dealer,
     build_shoe,
     evaluate_hand,
+    observe_split_replacement,
     player_action_decision,
     player_double,
     player_hit,
@@ -347,19 +348,34 @@ def test_split_order_rank_identity_and_known_unknown_bookkeeping() -> None:
     original = start_round(
         make_game(players=(Hand(cards=(EIGHT_C, card(Rank.EIGHT, Suit.DIAMONDS))),))
     )
-    split = player_split(original, TWO_S, UnknownCard())
+    split = player_split(original)
 
-    assert split.player_hands[0].hand.cards == (EIGHT_C, TWO_S)
-    assert isinstance(split.player_hands[1].hand.cards[1], UnknownCard)
+    assert split.player_hands[0].hand.cards == (EIGHT_C,)
+    assert split.player_hands[1].hand.cards == (
+        card(Rank.EIGHT, Suit.DIAMONDS),
+    )
     assert tuple(hand.seat for hand in split.player_hands) == (1, 1)
-    assert split.game_state.shoe.count(TWO_S) == 0
-    assert split.game_state.shoe.unknown_removed_count == 1
+    assert split.game_state.shoe == original.game_state.shoe
+    assert tuple(hand.hand_id for hand in split.player_hands) == (
+        "seat-1-hand-1-1",
+        "seat-1-hand-1-2",
+    )
     assert split.active_hand_index == 0
+
+    observed = observe_split_replacement(
+        observe_split_replacement(split, "seat-1-hand-1-1", TWO_S),
+        "seat-1-hand-1-2",
+        UnknownCard(),
+    )
+    assert observed.player_hands[0].hand.cards == (EIGHT_C, TWO_S)
+    assert isinstance(observed.player_hands[1].hand.cards[1], UnknownCard)
+    assert observed.game_state.shoe.count(TWO_S) == 0
+    assert observed.game_state.shoe.unknown_removed_count == 1
 
     not_pair = start_round(make_game(players=(Hand(cards=(TEN_H, KING_C)),)))
     with pytest.raises(TransitionError) as rejected:
-        player_split(not_pair, TWO_S, THREE_S)
-    assert rejected.value.code == "split_not_allowed"
+        player_split(not_pair)
+    assert rejected.value.code == "exact_pair_required"
 
 
 def test_split_limit_and_double_after_split() -> None:
@@ -369,7 +385,8 @@ def test_split_limit_and_double_after_split() -> None:
             players=(Hand(cards=(EIGHT_C, card(Rank.EIGHT, Suit.DIAMONDS))),),
         )
     )
-    split = player_split(base, EIGHT_H, TWO_S)
+    split = player_split(base)
+    split = observe_split_replacement(split, "seat-1-hand-1-1", EIGHT_H)
     assert (
         player_action_decision(split, PlayerAction.SPLIT).code
         == "split_limit_reached"
@@ -394,7 +411,7 @@ def test_split_limit_counts_only_hands_from_the_same_seat() -> None:
         seats=(1, 2),
     )
 
-    split = player_split(original, TWO_S, THREE_S)
+    split = player_split(original)
     assert tuple(hand.seat for hand in split.player_hands) == (1, 1, 2)
 
 
@@ -404,7 +421,8 @@ def test_double_after_split_is_allowed_when_configured() -> None:
             players=(Hand(cards=(EIGHT_C, card(Rank.EIGHT, Suit.DIAMONDS))),),
         )
     )
-    split = player_split(original, TWO_S, THREE_S)
+    split = player_split(original)
+    split = observe_split_replacement(split, "seat-1-hand-1-1", TWO_S)
     doubled = player_double(split, FOUR_S)
     assert doubled.player_hands[0].doubled is True
     assert doubled.player_hands[0].status is HandStatus.STOOD
@@ -418,7 +436,9 @@ def test_split_aces_terminal_and_blackjack_configuration(
     original = start_round(
         make_game(rules=configured, players=(Hand(cards=(AS, AH)),))
     )
-    split = player_split(original, TEN_H, NINE_C)
+    split = player_split(original)
+    split = observe_split_replacement(split, "seat-1-hand-1-1", TEN_H)
+    split = observe_split_replacement(split, "seat-1-hand-1-2", NINE_C)
     expected = HandStatus.BLACKJACK if blackjack_after_split else HandStatus.STOOD
     assert split.player_hands[0].status is expected
     assert split.player_hands[1].status is HandStatus.STOOD
@@ -432,7 +452,10 @@ def test_resplit_aces_disabled_and_enabled() -> None:
             players=(Hand(cards=(AS, AH)),),
         )
     )
-    terminal = player_split(disabled, AD, NINE_C)
+    terminal = player_split(disabled)
+    terminal = observe_split_replacement(
+        terminal, "seat-1-hand-1-1", AD
+    )
     assert terminal.player_hands[0].status is HandStatus.STOOD
 
     enabled = start_round(
@@ -441,7 +464,10 @@ def test_resplit_aces_disabled_and_enabled() -> None:
             players=(Hand(cards=(AS, AH)),),
         )
     )
-    resplittable = player_split(enabled, AD, NINE_C)
+    resplittable = player_split(enabled)
+    resplittable = observe_split_replacement(
+        resplittable, "seat-1-hand-1-1", AD
+    )
     assert resplittable.player_hands[0].status is HandStatus.ACTIVE
     assert player_action_decision(resplittable, PlayerAction.SPLIT).allowed
     assert not player_action_decision(resplittable, PlayerAction.HIT).allowed
@@ -454,7 +480,8 @@ def test_hit_split_aces_allows_normal_play() -> None:
             players=(Hand(cards=(AS, AH)),),
         )
     )
-    split = player_split(original, TWO_S, THREE_S)
+    split = player_split(original)
+    split = observe_split_replacement(split, "seat-1-hand-1-1", TWO_S)
     assert split.player_hands[0].status is HandStatus.ACTIVE
     assert player_action_decision(split, PlayerAction.HIT).allowed
 

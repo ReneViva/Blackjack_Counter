@@ -1,4 +1,5 @@
 import type { SessionState } from "../state/gameReducer";
+import type { TableTarget } from "../domain/events";
 import { getApiBaseUrl } from "./client";
 import { toTableStatePayload } from "./tableState";
 
@@ -141,12 +142,13 @@ export async function compareResearch(
   includeAceInformation: boolean,
   signal?: AbortSignal,
   includeExactReference = true,
+  analysisTarget: TableTarget | null = null,
 ): Promise<ResearchComparisonResponse> {
   const response = await fetch(`${getApiBaseUrl()}/research/compare`, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify({
-      state: toTableStatePayload(state),
+      state: toTableStatePayload(state, analysisTarget),
       options: {
         primary_definition_ids: definitionIds,
         include_ace_information: includeAceInformation,

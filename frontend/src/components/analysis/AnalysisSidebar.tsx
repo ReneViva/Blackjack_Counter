@@ -13,11 +13,15 @@ import {
   type ResearchComparisonResponse,
 } from "../../api/research";
 import type { SessionState } from "../../state/gameReducer";
+import type { TableTarget } from "../../domain/events";
 import { selectTableState } from "../../state/selectors";
 import ShoeStatus from "../table/ShoeStatus";
 
 type RequestStatus = "idle" | "updating" | "current" | "incomplete" | "unavailable";
-type AnalysisSidebarProps = Readonly<{ state: SessionState }>;
+type AnalysisSidebarProps = Readonly<{
+  activeTarget?: TableTarget | null;
+  state: SessionState;
+}>;
 
 function percentage(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
@@ -28,7 +32,7 @@ function exactResult(result: AnalysisResponse | null): ExactAnalysisResponse | n
   return result;
 }
 
-export default function AnalysisSidebar({ state }: AnalysisSidebarProps) {
+export default function AnalysisSidebar({ activeTarget = null, state }: AnalysisSidebarProps) {
   const [status, setStatus] = useState<RequestStatus>("idle");
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [research, setResearch] = useState<ResearchComparisonResponse | null>(null);
@@ -38,9 +42,18 @@ export default function AnalysisSidebar({ state }: AnalysisSidebarProps) {
   const requestIdentity = useRef(0);
   const sessionStarted = state.events.some((event) => event.type === "NEW_SHOE");
   const table = selectTableState(state);
-  const userCards = state.configuration.userSeat === null
+  const userHands = state.configuration.userSeat === null
     ? []
-    : table.playerCards[state.configuration.userSeat];
+    : table.playerHands[state.configuration.userSeat];
+  const selectedUserHand = activeTarget?.kind === "player-hand" &&
+      activeTarget.seat === state.configuration.userSeat
+    ? userHands.find((hand) => hand.handId === activeTarget.handId) ?? null
+    : userHands.length === 1
+      ? userHands[0]
+      : null;
+  const userCards = selectedUserHand?.cards ?? [];
+  const userHandCount = userHands.length;
+  const analysisHandId = userHandCount > 1 ? selectedUserHand?.handId ?? null : null;
   const canRunExact = state.configuration.rules.decks !== null &&
     userCards.length >= 2 && table.dealerCards.length >= 1;
 
@@ -62,8 +75,16 @@ export default function AnalysisSidebar({ state }: AnalysisSidebarProps) {
     const timeout = window.setTimeout(() => {
       const nextController = new AbortController();
       controller.current = nextController;
+      const analysisTarget: TableTarget | null = analysisHandId !== null &&
+          state.configuration.userSeat !== null
+        ? {
+            kind: "player-hand",
+            seat: state.configuration.userSeat,
+            handId: analysisHandId,
+          }
+        : null;
       const exactRequest: Promise<AnalysisResponse | null> = canRunExact
-        ? analyzeExact(state, nextController.signal)
+        ? analyzeExact(state, nextController.signal, analysisTarget)
         : Promise.resolve(null);
       void Promise.allSettled([
         exactRequest,
@@ -73,6 +94,7 @@ export default function AnalysisSidebar({ state }: AnalysisSidebarProps) {
           true,
           nextController.signal,
           false,
+          analysisTarget,
         ),
       ]).then(([analysisResult, researchResult]) => {
         if (identity !== requestIdentity.current || nextController.signal.aborted) return;
@@ -97,7 +119,11 @@ export default function AnalysisSidebar({ state }: AnalysisSidebarProps) {
         } else {
           setAnalysis(null);
           setStatus("incomplete");
-          setAnalysisMessage("Waiting for a known deck, two primary-hand cards, and a dealer observation.");
+          setAnalysisMessage(
+            userHandCount > 1 && analysisHandId === null
+              ? "Select a specific primary hand to analyze its finite-shoe outcomes."
+              : "Waiting for a known deck, two primary-hand cards, and a dealer observation.",
+          );
         }
 
         if (researchResult.status === "fulfilled") {
@@ -119,7 +145,7 @@ export default function AnalysisSidebar({ state }: AnalysisSidebarProps) {
       window.clearTimeout(timeout);
       controller.current?.abort();
     };
-  }, [canRunExact, sessionStarted, state]);
+  }, [analysisHandId, canRunExact, sessionStarted, state, userHandCount]);
 
   const exact = exactResult(analysis);
   const scores = Array.isArray(research?.scores) ? research.scores : [];

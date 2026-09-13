@@ -8,6 +8,7 @@ from app.domain import (
     ObservedCard,
     Rules,
     UnknownCard,
+    initial_hand_id,
 )
 from app.schemas import (
     KnownCardSchema,
@@ -24,12 +25,21 @@ class ReconstructedPlayerHand:
     seat: int
     is_user: bool
     hand: Hand
+    hand_id: str | None = None
+    parent_hand_id: str | None = None
+    split_depth: int = 0
+    from_split_aces: bool = False
+
+    def __post_init__(self) -> None:
+        if self.hand_id is None:
+            object.__setattr__(self, "hand_id", initial_hand_id(self.seat))
 
 
 @dataclass(frozen=True, slots=True)
 class ReconstructedTableState:
     deck_count: int | None
     dealer_soft_17: DealerSoft17 | None
+    max_split_hands: int
     dealer_hand: Hand
     players: tuple[ReconstructedPlayerHand, ...]
     discarded_cards: tuple[ObservedCard, ...]
@@ -53,6 +63,10 @@ def build_player(player: PlayerHandSchema) -> ReconstructedPlayerHand:
         seat=player.seat,
         is_user=player.is_user,
         hand=build_hand(player.cards),
+        hand_id=player.hand_id or initial_hand_id(player.seat),
+        parent_hand_id=player.parent_hand_id,
+        split_depth=player.split_depth,
+        from_split_aces=player.from_split_aces,
     )
 
 
@@ -115,6 +129,7 @@ def build_table_state(payload: TableStateSchema) -> ReconstructedTableState:
     return ReconstructedTableState(
         deck_count=payload.rules.decks,
         dealer_soft_17=payload.rules.dealer_soft_17,
+        max_split_hands=payload.rules.max_split_hands,
         dealer_hand=dealer_hand,
         players=players,
         discarded_cards=discarded_cards,

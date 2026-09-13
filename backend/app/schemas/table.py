@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
 from .card import ObservedCardSchema
 from .rules import RulesSchema
@@ -18,6 +18,10 @@ class HandSchema(BaseModel):
 class PlayerHandSchema(HandSchema):
     seat: SeatNumber
     is_user: StrictBool = False
+    hand_id: Annotated[StrictStr, Field(min_length=1)] | None = None
+    parent_hand_id: Annotated[StrictStr, Field(min_length=1)] | None = None
+    split_depth: Annotated[StrictInt, Field(ge=0)] = 0
+    from_split_aces: StrictBool = False
 
 
 class TableStateSchema(BaseModel):

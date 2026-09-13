@@ -1,10 +1,24 @@
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 
 from app.domain import DealerCheckResult
 
-from .table import TableStateSchema
+from .table import SeatNumber, TableStateSchema
+
+
+class PlayerHandTargetSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    seat: SeatNumber
+    hand_id: Annotated[StrictStr, Field(min_length=1)]
+
+
+class PlayerActionsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    state: TableStateSchema
+    target: PlayerHandTargetSchema
 
 
 class ExactAnalysisOptions(BaseModel):

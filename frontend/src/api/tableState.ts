@@ -1,4 +1,5 @@
 import type { ObservedCard, Suit } from "../domain/card";
+import type { TableTarget } from "../domain/events";
 import type { SeatNumber } from "../domain/game";
 import type { SessionState } from "../state/gameReducer";
 import { selectTableState } from "../state/selectors";
@@ -50,6 +51,10 @@ export type TableStatePayload = Readonly<{
   players: readonly Readonly<{
     seat: SeatNumber;
     is_user: boolean;
+    hand_id: string;
+    parent_hand_id: string | null;
+    split_depth: number;
+    from_split_aces: boolean;
     cards: readonly ObservedCardPayload[];
   }>[];
   discarded_cards: readonly ObservedCardPayload[];
@@ -61,8 +66,20 @@ function toObservedCardPayload(card: ObservedCard): ObservedCardPayload {
     : { kind: "unknown" };
 }
 
-export function toTableStatePayload(state: SessionState): TableStatePayload {
+export function toTableStatePayload(
+  state: SessionState,
+  analysisTarget: TableTarget | null = null,
+): TableStatePayload {
   const table = selectTableState(state);
+  const userHands = state.configuration.userSeat === null
+    ? []
+    : table.playerHands[state.configuration.userSeat];
+  const selectedUserHandId = analysisTarget?.kind === "player-hand" &&
+      analysisTarget.seat === state.configuration.userSeat
+    ? analysisTarget.handId
+    : userHands.length === 1
+      ? userHands[0].handId
+      : null;
 
   return {
     rules: {
@@ -83,11 +100,30 @@ export function toTableStatePayload(state: SessionState): TableStatePayload {
     dealer: {
       cards: table.dealerCards.map(toObservedCardPayload),
     },
-    players: state.configuration.activeSeats.map((seat) => ({
-      seat,
-      is_user: seat === state.configuration.userSeat,
-      cards: table.playerCards[seat].map(toObservedCardPayload),
-    })),
+    players: state.configuration.activeSeats.flatMap((seat) =>
+      table.playerHands[seat].map((hand) => ({
+        seat,
+        is_user: seat === state.configuration.userSeat &&
+          hand.handId === selectedUserHandId,
+        hand_id: hand.handId,
+        parent_hand_id: hand.parentHandId,
+        split_depth: hand.splitDepth,
+        from_split_aces: hand.fromSplitAces,
+        cards: hand.cards.map(toObservedCardPayload),
+      })),
+    ),
     discarded_cards: table.discardedCards.map(toObservedCardPayload),
+  };
+}
+
+export function toLegacyTableStatePayload(state: SessionState) {
+  const current = toTableStatePayload(state);
+  return {
+    ...current,
+    players: current.players.map((player) => ({
+      seat: player.seat,
+      is_user: player.is_user,
+      cards: player.cards,
+    })),
   };
 }

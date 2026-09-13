@@ -8,7 +8,7 @@ function table(overrides: Partial<DerivedTableState> = {}): DerivedTableState {
   return {
     dealerCards: [],
     discardedCards: [],
-    playerCards: { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [] },
+    playerHands: { 1: [], 2: [], 3: [], 4: [], 5: [], 6: [], 7: [] },
     ...overrides,
   };
 }
@@ -38,8 +38,18 @@ describe("card assignment panel", () => {
   it("assigns known and unknown observations to the active target", () => {
     const onKnownCard = vi.fn();
     const onUnknownCard = vi.fn();
-    const activeTarget = { kind: "player", seat: 4 } as const;
-    render(<CardPicker activeTarget={activeTarget} decks={2} table={table()} onKnownCard={onKnownCard} onUnknownCard={onUnknownCard} />);
+    const activeTarget = { kind: "player-hand", seat: 4, handId: "seat-4-hand-1" } as const;
+    const activeTable = table({ playerHands: {
+      1: [], 2: [], 3: [], 5: [], 6: [], 7: [],
+      4: [{
+        handId: "seat-4-hand-1",
+        parentHandId: null,
+        splitDepth: 0,
+        fromSplitAces: false,
+        cards: [],
+      }],
+    } });
+    render(<CardPicker activeTarget={activeTarget} decks={2} table={activeTable} onKnownCard={onKnownCard} onUnknownCard={onUnknownCard} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Eight of hearts" }));
     fireEvent.click(screen.getByRole("button", { name: "Assign unknown card" }));

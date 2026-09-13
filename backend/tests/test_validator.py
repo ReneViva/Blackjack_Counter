@@ -105,6 +105,7 @@ def test_rule_compatibility_checks_reconstructed_metadata() -> None:
     state = ReconstructedTableState(
         deck_count=2,
         dealer_soft_17=DealerSoft17.HIT,
+        max_split_hands=4,
         dealer_hand=Hand(),
         players=(ReconstructedPlayerHand(seat=1, is_user=True, hand=Hand()),),
         discarded_cards=(),

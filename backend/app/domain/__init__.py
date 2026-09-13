@@ -8,6 +8,8 @@ from .round import (
     PlayerHandState,
     RoundPhase,
     RoundState,
+    initial_hand_id,
+    split_child_hand_ids,
 )
 from .rules import (
     DealerBlackjackCheckRule,
@@ -37,6 +39,8 @@ __all__ = [
     "Rules",
     "RoundPhase",
     "RoundState",
+    "initial_hand_id",
+    "split_child_hand_ids",
     "Shoe",
     "Suit",
     "SurrenderRule",

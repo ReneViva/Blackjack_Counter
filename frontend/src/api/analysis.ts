@@ -1,4 +1,5 @@
 import type { SessionState } from "../state/gameReducer";
+import type { TableTarget } from "../domain/events";
 import { getApiBaseUrl } from "./client";
 import { toTableStatePayload } from "./tableState";
 
@@ -96,11 +97,11 @@ function isAnalysisResponse(value: unknown): value is AnalysisResponse {
     (Array.isArray(candidate.scenarios) || "state_summary" in candidate);
 }
 
-export async function analyze(state: SessionState, options: AnalysisOptions, signal?: AbortSignal): Promise<AnalysisResponse> {
+export async function analyze(state: SessionState, options: AnalysisOptions, signal?: AbortSignal, analysisTarget: TableTarget | null = null): Promise<AnalysisResponse> {
   const response = await fetch(`${getApiBaseUrl()}/analyze`, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ state: toTableStatePayload(state), options }),
+    body: JSON.stringify({ state: toTableStatePayload(state, analysisTarget), options }),
     signal,
   });
   const payload: unknown = await response.json();
@@ -112,6 +113,6 @@ export async function analyze(state: SessionState, options: AnalysisOptions, sig
   return payload;
 }
 
-export function analyzeExact(state: SessionState, signal?: AbortSignal): Promise<AnalysisResponse> {
-  return analyze(state, { method: "exact" }, signal);
+export function analyzeExact(state: SessionState, signal?: AbortSignal, analysisTarget: TableTarget | null = null): Promise<AnalysisResponse> {
+  return analyze(state, { method: "exact" }, signal, analysisTarget);
 }

@@ -30,12 +30,19 @@ export default function CardPicker({
   const observed = [
     ...table.dealerCards,
     ...table.discardedCards,
-    ...Object.values(table.playerCards).flat(),
+    ...Object.values(table.playerHands).flatMap((hands) =>
+      hands.flatMap((hand) => hand.cards)
+    ),
   ];
+  const activeHandIndex = activeTarget?.kind === "player-hand"
+    ? table.playerHands[activeTarget.seat].findIndex(
+        (hand) => hand.handId === activeTarget.handId,
+      )
+    : -1;
   const targetName = activeTarget?.kind === "dealer"
     ? "Dealer"
-    : activeTarget?.kind === "player"
-      ? `Seat ${activeTarget.seat}`
+    : activeTarget?.kind === "player-hand" && activeHandIndex >= 0
+      ? `Seat ${activeTarget.seat}, Hand ${activeHandIndex + 1}`
       : null;
 
   const isUnavailable = (card: KnownCard): boolean => {
@@ -57,7 +64,7 @@ export default function CardPicker({
       <p id="assignment-prompt" className="assignment-prompt" role="status" aria-live="polite" aria-atomic="true">
         {targetName
           ? <>Assigning to: <strong>{targetName}</strong></>
-          : "Select the dealer or an occupied player first."}
+          : "Select the dealer or an occupied player first, then choose a hand."}
       </p>
 
       <div className="card-inventory" aria-label="All 52 cards">

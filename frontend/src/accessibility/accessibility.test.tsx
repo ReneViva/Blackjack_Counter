@@ -34,7 +34,7 @@ describe("Phase 29 accessibility and UX contract", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add player at Seat 4" }));
 
     const seat = screen.getByRole("button", {
-      name: "Seat 4, occupied, primary hand, active target",
+      name: "Seat 4, occupied, primary hand, active target, Hand 1",
     });
     expect(seat).toHaveFocus();
     expect(seat).toHaveAttribute("aria-pressed", "true");

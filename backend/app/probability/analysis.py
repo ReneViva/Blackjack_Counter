@@ -9,6 +9,7 @@ from app.domain import (
     PlayerHandState,
     RoundPhase,
     RoundState,
+    Rank,
     Shoe,
 )
 from app.engine import (
@@ -58,7 +59,11 @@ def build_dealer_completion_round(
     user_hand = resolved_user_hand or user.hand
     dealer_hand = resolved_dealer_hand or state.dealer_hand
     shoe = resolved_shoe or state.game_state.shoe
-    value = evaluate_hand(user_hand)
+    value = evaluate_hand(
+        user_hand,
+        split_origin=Rank.ACE if user.split_depth > 0 else None,
+        blackjack_after_split=state.game_state.rules.blackjack_after_split,
+    )
     if not value.determinate:
         raise ExactAnalysisError(
             "exact_analysis_requires_resolved_hidden_composition",
@@ -76,6 +81,10 @@ def build_dealer_completion_round(
         hand=user_hand,
         status=status,
         decision_count=1,
+        split_depth=user.split_depth,
+        from_split_aces=user.from_split_aces,
+        hand_id=user.hand_id,
+        parent_hand_id=user.parent_hand_id,
     )
     game_state = GameState(
         rules=state.game_state.rules,
