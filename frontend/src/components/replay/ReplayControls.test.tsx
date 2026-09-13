@@ -40,7 +40,9 @@ describe("ReplayControls", () => {
     render(<ReplayControls state={createInitialState()} onActivate={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: "Export Session Replay" })).toBeDisabled();
-    expect(screen.getByLabelText("Import Replay (.json)")).toHaveAttribute("accept", ".json,application/json");
+    const input = screen.getByLabelText("Import Replay (.json)");
+    expect(input).toHaveAttribute("accept", ".json,application/json");
+    expect(input).toHaveAccessibleDescription("Accepted file type: JSON.");
     expect(screen.queryByLabelText(/autosave|persistent|wager|bankroll|player action/i)).not.toBeInTheDocument();
   });
 
@@ -115,6 +117,8 @@ describe("ReplayControls", () => {
     });
 
     expect(await screen.findByRole("alert")).toHaveTextContent("not valid JSON");
+    expect(screen.getByLabelText("Import Replay (.json)")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Import Replay (.json)")).toHaveAccessibleDescription(/not valid JSON/);
     expect(onActivate).not.toHaveBeenCalled();
   });
 });

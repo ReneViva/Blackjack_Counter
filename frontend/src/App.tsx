@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 
 import { getHealth } from "./api/health";
 import { validateSessionState } from "./api/validation";
@@ -72,6 +79,9 @@ export default function App() {
   const [persistenceNotice, setPersistenceNotice] = useState<PersistenceNotice | null>(
     initialSession.notice,
   );
+  const settingsTrigger = useRef<HTMLButtonElement | null>(null);
+  const settingsDialog = useRef<HTMLElement | null>(null);
+  const settingsClose = useRef<HTMLButtonElement | null>(null);
   const requestController = useRef<AbortController | null>(null);
   const corruptStorageHandled = useRef(false);
   const lastPersistenceCandidate = useRef(session);
@@ -166,6 +176,12 @@ export default function App() {
     return () => controller.abort();
   }, [initialSession]);
 
+  useEffect(() => {
+    if (!settingsOpen) return;
+    settingsClose.current?.focus();
+    return () => settingsTrigger.current?.focus();
+  }, [settingsOpen]);
+
   const sessionStarted = session.events.some((event) => event.type === "NEW_SHOE");
 
   const newSession = () => {
@@ -173,8 +189,34 @@ export default function App() {
     dispatch({ type: "RESET" });
   };
 
+  const closeSettings = () => setSettingsOpen(false);
+
+  const handleSettingsKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeSettings();
+      return;
+    }
+    if (event.key !== "Tab") return;
+
+    const focusable = [...(settingsDialog.current?.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
+    ) ?? [])].filter((element) => !element.hidden);
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
   return (
-    <main className="app-shell">
+    <div className="app-shell">
+      <a className="skip-link" href="#main-content">Skip to blackjack workspace</a>
       <header className="app-header">
         <div className="brand-block">
           <p className="eyebrow">Educational simulation</p>
@@ -183,18 +225,20 @@ export default function App() {
         </div>
 
         <div className="header-command-bar">
-          <div className={`connection connection--${connectionState}`} role="status">
+          <div className={`connection connection--${connectionState}`}>
             <span className="connection__indicator" aria-hidden="true" />
             <div>
-              <strong>{connectionState === "connected" ? "Ready" : connectionState === "loading" ? "Connecting" : "Offline"}</strong>
-              <p>
-                {connectionState === "loading" && "Checking backend connection…"}
-                {connectionState === "connected" && (sessionStarted ? "Backend connected · Analysis current" : "Backend connected · Create a hand or import a session")}
-                {connectionState === "unavailable" && "Backend unavailable"}
-              </p>
+              <div className="connection__state" role="status" aria-live="polite" aria-atomic="true">
+                <strong>{connectionState === "connected" ? "Ready" : connectionState === "loading" ? "Connecting" : "Offline"}</strong>
+                <p>
+                  {connectionState === "loading" && "Checking backend connection…"}
+                  {connectionState === "connected" && (sessionStarted ? "Backend connected · Table editing available" : "Backend connected · Create a hand or import a session")}
+                  {connectionState === "unavailable" && <><span>Backend unavailable</span><span> · Local table editing remains available</span></>}
+                </p>
+              </div>
               {persistenceNotice && (
                 <small
-                  aria-live="polite"
+                  role={persistenceNotice.tone === "warning" ? "alert" : "status"}
                   className={`persistence-status persistence-status--${persistenceNotice.tone}`}
                   data-persistence-code={persistenceNotice.code}
                 >
@@ -214,33 +258,36 @@ export default function App() {
             })}
           />
           <button type="button" className="header-action" onClick={newSession}><span aria-hidden="true">□</span> New Session</button>
-          <button type="button" className="settings-button" aria-label="Open table settings" onClick={() => setSettingsOpen(true)}><span aria-hidden="true">⚙</span></button>
+          <button ref={settingsTrigger} type="button" className="settings-button" aria-label="Open table settings" aria-haspopup="dialog" aria-expanded={settingsOpen} onClick={() => setSettingsOpen(true)}><span aria-hidden="true">⚙</span></button>
         </div>
       </header>
 
-      <TablePage state={session} dispatch={dispatch} />
+      <main id="main-content" className="app-main" tabIndex={-1}>
+        <TablePage state={session} dispatch={dispatch} />
+      </main>
 
       {settingsOpen && (
         <div className="modal-backdrop" onMouseDown={(event) => {
-          if (event.target === event.currentTarget) setSettingsOpen(false);
+          if (event.target === event.currentTarget) closeSettings();
         }}>
-          <section className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+          <section ref={settingsDialog} className="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title" aria-describedby="settings-description" onKeyDown={handleSettingsKeyDown}>
             <div className="settings-dialog__header">
               <div><p className="eyebrow">Session configuration</p><h2 id="settings-title">Table settings</h2></div>
-              <button type="button" className="close-button" aria-label="Close table settings" onClick={() => setSettingsOpen(false)}>×</button>
+              <button ref={settingsClose} type="button" className="close-button" aria-label="Close table settings" onClick={closeSettings}>×</button>
             </div>
+            <p id="settings-description" className="visually-hidden">Configure session rules and seats. Press Escape to close this dialog.</p>
             <SetupPage
               configuration={session.configuration}
               disabled={sessionStarted}
               onChange={(configuration) => dispatch({ type: "CONFIGURE_SESSION", configuration })}
               onStart={() => {
                 dispatch({ type: "NEW_SHOE" });
-                setSettingsOpen(false);
+                closeSettings();
               }}
             />
           </section>
         </div>
       )}
-    </main>
+    </div>
   );
 }

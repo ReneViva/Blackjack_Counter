@@ -59,13 +59,17 @@ export default function ReplayControls({ state, onActivate }: ReplayControlsProp
     }
   };
 
-  return <section className="replay-controls" aria-label="Session replay controls">
+  const importDescription = message ? "replay-file-help replay-import-status" : "replay-file-help";
+
+  return <nav className="replay-controls" aria-label="Session Replay actions">
     <div className="replay-actions">
       <label className="button-secondary replay-import-control">
         <span aria-hidden="true">↥</span> Import Replay
         <input
           type="file"
           aria-label="Import Replay (.json)"
+          aria-describedby={importDescription}
+          aria-invalid={status === "error"}
           accept=".json,application/json"
           disabled={status === "loading"}
           onChange={(event) => {
@@ -77,6 +81,7 @@ export default function ReplayControls({ state, onActivate }: ReplayControlsProp
       </label>
       <button type="button" className="button-secondary" aria-label="Export Session Replay" disabled={!hasSession} onClick={exportReplay}><span aria-hidden="true">↧</span> Export Session</button>
     </div>
-    {message && <p className={`replay-message${status === "error" ? " replay-message--error" : ""}`} role={status === "error" ? "alert" : "status"}>{message}</p>}
-  </section>;
+    <span id="replay-file-help" className="visually-hidden">Accepted file type: JSON.</span>
+    {message && <p id="replay-import-status" className={`replay-message${status === "error" ? " replay-message--error" : ""}`} role={status === "error" ? "alert" : "status"} aria-atomic="true">{message}</p>}
+  </nav>;
 }

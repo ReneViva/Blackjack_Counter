@@ -10,7 +10,7 @@ type DealerPositionProps = Readonly<{
 
 export default function DealerPosition({ active, cards, onSelect }: DealerPositionProps) {
   return (
-    <section className={`table-position dealer-position${active ? " table-position--active" : ""}`}>
+    <div className={`table-position dealer-position${active ? " table-position--active" : ""}`}>
       <button
         type="button"
         className="target-button"
@@ -22,11 +22,11 @@ export default function DealerPosition({ active, cards, onSelect }: DealerPositi
         <span className="target-label">Dealer</span>
         {active && <span className="active-badge">Active</span>}
       </button>
-      <div className="table-card-row" aria-label="Dealer observed cards">
+      <div className="table-card-row" aria-label="Dealer observed cards" aria-live="polite">
         {cards.map((card, index) => (
           <PlayingCard card={card} key={`${card.kind}-${index}`} compact />
         ))}
       </div>
-    </section>
+    </div>
   );
 }

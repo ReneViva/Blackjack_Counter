@@ -37,6 +37,7 @@ export default function PlayingCard({ card, compact = false }: PlayingCardProps)
     return (
       <span
         className={`playing-card playing-card--unknown${compact ? " playing-card--compact" : ""}`}
+        role="img"
         aria-label="Unknown card"
       >
         <span aria-hidden="true">?</span>
@@ -47,6 +48,7 @@ export default function PlayingCard({ card, compact = false }: PlayingCardProps)
   return (
     <span
       className={`playing-card playing-card--${card.suit}${compact ? " playing-card--compact" : ""}`}
+      role="img"
       aria-label={cardAccessibleName(card.rank, card.suit)}
     >
       <span>{card.rank}</span>

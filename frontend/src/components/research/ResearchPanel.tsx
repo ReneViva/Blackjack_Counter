@@ -155,29 +155,41 @@ export default function ResearchPanel({ state }: ResearchPanelProps) {
   const currentExact = current?.exact_reference && "status" in current.exact_reference
     ? current.exact_reference
     : null;
+  const currentSelectionInvalid = currentStatus === "error" && currentError?.startsWith("Select at least") === true;
+  const batchSelectionInvalid = batchStatus === "error" && batchError?.startsWith("Select at least") === true;
+  const caseCountInvalid = batchStatus === "error" && batchError?.startsWith("Case count") === true;
+  const removedCardsInvalid = batchStatus === "error" && batchError?.startsWith("Removed cards") === true;
+  const seedInvalid = batchStatus === "error" && batchError?.startsWith("Seed") === true;
+  const selectionErrorId = currentSelectionInvalid
+    ? "research-current-error"
+    : batchSelectionInvalid
+      ? "research-batch-error"
+      : undefined;
 
   return <section className="panel research-panel" aria-labelledby="research-heading">
     <div className="section-heading"><div><p className="eyebrow">Research / Academic Comparison</p><h2 id="research-heading">Count compression laboratory</h2></div><span>Offline educational analysis</span></div>
     <p className="analysis-note">Compare source-backed raw research scores with the exact finite-shoe reference. Correlation describes association; it does not imply causality or prescribe decisions.</p>
 
-    <fieldset className="research-system-picker"><legend>Primary research systems</legend>{RESEARCH_DEFINITIONS.map((definition) => <label key={definition.id} className="checkbox-control"><input type="checkbox" checked={selected.has(definition.id)} onChange={() => toggleDefinition(definition.id)} />{definition.label}</label>)}</fieldset>
+    <fieldset className="research-system-picker" aria-invalid={currentSelectionInvalid || batchSelectionInvalid} aria-describedby={selectionErrorId}><legend>Primary research systems</legend>{RESEARCH_DEFINITIONS.map((definition) => <label key={definition.id} className="checkbox-control"><input type="checkbox" checked={selected.has(definition.id)} onChange={() => toggleDefinition(definition.id)} />{definition.label}</label>)}</fieldset>
     <label className="checkbox-control research-ace"><input type="checkbox" checked={includeAce} onChange={(event) => setIncludeAce(event.target.checked)} />Include Ace Information as a separate auxiliary feature</label>
 
-    <div className="research-section">
+    <section className="research-section" aria-busy={currentStatus === "loading"}>
       <h3>Current-state research comparison</h3>
       <p>Raw research scores and exact probability remain separate outputs.</p>
-      <button type="button" onClick={() => void runCurrent()} disabled={currentStatus === "loading"}>{currentStatus === "loading" ? "Comparing current state..." : "Compare current state"}</button>
-      {currentStatus === "error" && <p className="analysis-error" role="alert">{currentError}</p>}
+      <button type="button" onClick={() => void runCurrent()} disabled={currentStatus === "loading"} aria-describedby={currentStatus === "error" ? "research-current-error" : undefined}>{currentStatus === "loading" ? "Comparing current state..." : "Compare current state"}</button>
+      {currentStatus === "loading" && <p className="request-status" role="status">Comparing current-state research scores.</p>}
+      {currentStatus === "error" && <p id="research-current-error" className="analysis-error" role="alert">{currentError}</p>}
       {current && <div className="research-results" aria-live="polite"><DefinitionCards definitions={current.scores.map((score) => score.definition)} /><div className="table-scroll"><table><caption>Raw research scores</caption><thead><tr><th>System</th><th>Raw score</th><th>Known observations</th><th>Status</th><th>Ace Information</th></tr></thead><tbody>{current.scores.map((score) => <tr key={score.definition.identifier}><th scope="row">{score.definition.label}</th><td>{score.raw_score_fraction}</td><td>{score.observed_known_cards}</td><td>{score.complete ? "Complete" : `Incomplete · ${score.unresolved_unknown_cards} unresolved`}</td><td>{score.ace_information ? `${score.ace_information.known_aces_observed} observed; ${score.ace_information.exact_aces_remaining ?? "unknown"} remaining` : "Not requested"}</td></tr>)}</tbody></table></div><div className="exact-reference"><h3>Exact finite-shoe probability reference</h3><ExactReferenceView reference={currentExact} />{current?.exact_reference && !("status" in current.exact_reference) && <p>Model uncertainty is returned as separate, unaveraged scenarios.</p>}</div></div>}
-    </div>
+    </section>
 
-    <div className="research-section">
+    <section className="research-section" aria-busy={batchStatus === "loading"}>
       <h3>Offline research experiment</h3>
-      <div className="research-controls"><label>Case count (2–50)<input aria-label="Research case count" type="number" min="2" max="50" step="1" value={caseCount} onChange={(event) => setCaseCount(Number(event.target.value))} /></label><label>Known cards removed per case (0–20)<input aria-label="Removed cards per research case" type="number" min="0" max="20" step="1" value={removedCards} onChange={(event) => setRemovedCards(Number(event.target.value))} /></label><label>Required reproducibility seed<input aria-label="Research seed" type="text" inputMode="numeric" pattern="[0-9]+" required value={seed} onChange={(event) => setSeed(event.target.value.trim())} /></label></div>
-      <button type="button" onClick={() => void runBatch()} disabled={batchStatus === "loading"}>{batchStatus === "loading" ? "Running bounded experiment..." : "Run offline experiment"}</button>
+      <div className="research-controls"><label>Case count (2–50)<input aria-label="Research case count" aria-invalid={caseCountInvalid} aria-describedby={caseCountInvalid ? "research-batch-error" : undefined} type="number" min="2" max="50" step="1" value={caseCount} onChange={(event) => setCaseCount(Number(event.target.value))} /></label><label>Known cards removed per case (0–20)<input aria-label="Removed cards per research case" aria-invalid={removedCardsInvalid} aria-describedby={removedCardsInvalid ? "research-batch-error" : undefined} type="number" min="0" max="20" step="1" value={removedCards} onChange={(event) => setRemovedCards(Number(event.target.value))} /></label><label>Required reproducibility seed<input aria-label="Research seed" aria-invalid={seedInvalid} aria-describedby={seedInvalid ? "research-batch-error" : undefined} type="text" inputMode="numeric" pattern="[0-9]+" required value={seed} onChange={(event) => setSeed(event.target.value.trim())} /></label></div>
+      <button type="button" onClick={() => void runBatch()} disabled={batchStatus === "loading"} aria-describedby={batchStatus === "error" ? "research-batch-error" : undefined}>{batchStatus === "loading" ? "Running bounded experiment..." : "Run offline experiment"}</button>
+      {batchStatus === "loading" && <p className="request-status" role="status">Running the bounded offline research experiment.</p>}
       {batch && batchRequest && <button type="button" className="button-secondary" onClick={() => downloadJsonFile("blackjack-research-batch.json", serializeResearchBatchExport(batchRequest, batch))}>Export Research JSON</button>}
-      {batchStatus === "error" && <p className="analysis-error" role="alert">{batchError}</p>}
+      {batchStatus === "error" && <p id="research-batch-error" className="analysis-error" role="alert">{batchError}</p>}
       {batch && <div className="research-results" aria-live="polite"><p><strong>Experiment summary:</strong> seed {batchSeed ?? String(batch.seed)} · {batch.completed_case_count}/{batch.requested_case_count} cases · {batch.removed_cards_per_case} known removals per independent case · exact references {batch.exact_available_count} available/{batch.exact_unavailable_count} unavailable.</p><DefinitionCards definitions={batch.definitions} /><div className="table-scroll"><table><caption>Computed experiment metrics</caption><thead><tr><th>System</th><th>Association target</th><th>Correlation</th><th>Status</th><th>Eligible n</th><th>Exclusions</th></tr></thead><tbody>{batch.metrics.map((metric) => <tr key={`${metric.definition_id}-${metric.metric_id}`}><th scope="row">{batch.definitions.find((definition) => definition.identifier === metric.definition_id)?.label ?? metric.definition_id}</th><td>{metric.target === "exact_win_probability" ? "Raw score vs exact win probability" : "Raw score vs exact outcome balance"}</td><td>{correlation(metric.value)}</td><td>{metric.status.replaceAll("_", " ")}</td><td>{metric.eligible_cases}/{metric.total_cases}</td><td>Incomplete {metric.excluded_incomplete_score}; exact unavailable {metric.excluded_exact_unavailable}; nonfinite {metric.excluded_nonfinite}</td></tr>)}</tbody></table></div><p className="metric-note">Pearson correlation: +1 perfect positive linear association, 0 no linear association, −1 perfect negative linear association. No causal interpretation is implied.</p><div className="table-scroll"><table><caption>Bounded experiment cases</caption><thead><tr><th>Case</th><th>Sampled known removals</th><th>Exact probability reference</th><th>Exact outcome balance</th><th>Raw research scores</th></tr></thead><tbody>{batch.cases.map((experimentCase) => <tr key={experimentCase.case_id}><th scope="row">{experimentCase.case_id}</th><td>{experimentCase.sampled_removed_ranks.join(", ") || "None"}</td><td>{experimentCase.exact_reference_status === "available" && experimentCase.exact_reference.outcomes ? `W ${probability(experimentCase.exact_reference.outcomes.win)} · P ${probability(experimentCase.exact_reference.outcomes.push)} · L ${probability(experimentCase.exact_reference.outcomes.loss)}` : `Unavailable: ${experimentCase.exact_reference.error?.message ?? "No exact result"}`}</td><td>{experimentCase.exact_outcome_balance === null ? "Unavailable" : experimentCase.exact_outcome_balance.toFixed(4)}</td><td>{experimentCase.research_results.map((score) => `${score.definition.label}: ${score.raw_score_fraction}${score.complete ? "" : " (incomplete)"}`).join(" · ")}</td></tr>)}</tbody></table></div></div>}
-    </div>
+    </section>
   </section>;
 }

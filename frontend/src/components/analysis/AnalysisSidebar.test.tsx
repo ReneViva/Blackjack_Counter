@@ -69,6 +69,19 @@ afterEach(() => {
 });
 
 describe("automatic analysis sidebar", () => {
+  it("distinguishes incomplete and unavailable analysis states in live status text", async () => {
+    const incomplete = gameReducer(createInitialState(), { type: "ADD_PLAYER", seat: 4 });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(researchResponse(0)));
+    const { rerender } = render(<AnalysisSidebar state={incomplete} />);
+
+    expect(await screen.findByText("Analysis needs more observations", {}, { timeout: 1500 })).toBeVisible();
+
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    rerender(<AnalysisSidebar state={startedState()} />);
+    expect(await screen.findByText("Analysis unavailable", {}, { timeout: 1500 })).toBeVisible();
+    expect(screen.getByText(/Analysis unavailable for the current state/)).toBeVisible();
+  });
+
   it("debounces backend exact and research requests and renders only returned mathematics", async () => {
     const fetchMock = vi.fn(async (url: string) => url.endsWith("/analyze") ? exactResponse(.5) : researchResponse(2));
     vi.stubGlobal("fetch", fetchMock);

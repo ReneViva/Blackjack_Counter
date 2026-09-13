@@ -51,8 +51,8 @@ export default function SetupPage({
         <p>Unknown assumptions stay explicit.</p>
       </div>
 
-      {disabled && <p className="settings-note">Rules are fixed for the active chronology. Start a new session to change them.</p>}
-      <fieldset className="settings-fieldset" disabled={disabled}>
+      {disabled && <p id="settings-locked-note" className="settings-note" role="status">Rules are fixed for the active chronology. Start a new session to change them.</p>}
+      <fieldset className="settings-fieldset" disabled={disabled} aria-describedby={disabled ? "settings-locked-note" : undefined}>
       <div className="control-grid">
         <label>
           Deck count

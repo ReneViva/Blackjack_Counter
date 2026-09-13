@@ -22,7 +22,8 @@ export default function BlackjackTable({
   userSeat,
 }: BlackjackTableProps) {
   return (
-    <section className="blackjack-table" aria-label="Interactive observed blackjack table">
+    <section className="blackjack-table" aria-labelledby="blackjack-table-title">
+      <h2 id="blackjack-table-title" className="visually-hidden">Interactive observed blackjack table</h2>
       <div className="table-felt">
         <DealerPosition
           active={activeTarget?.kind === "dealer"}

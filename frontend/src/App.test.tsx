@@ -29,9 +29,7 @@ describe("backend connectivity", () => {
 
     render(<App />);
 
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Checking backend connection",
-    );
+    expect(screen.getByText("Checking backend connection…")).toBeVisible();
   });
 
   it("shows the connected state after a successful health response", async () => {

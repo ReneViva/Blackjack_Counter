@@ -54,10 +54,10 @@ export default function CardPicker({
         </div>
         <span className="panel-icon" aria-hidden="true">♠</span>
       </div>
-      <p className="assignment-prompt" aria-live="polite">
+      <p id="assignment-prompt" className="assignment-prompt" role="status" aria-live="polite" aria-atomic="true">
         {targetName
           ? <>Assigning to: <strong>{targetName}</strong></>
-          : "Select an occupied seat or the dealer first"}
+          : "Select the dealer or an occupied player first."}
       </p>
 
       <div className="card-inventory" aria-label="All 52 cards">
@@ -78,7 +78,8 @@ export default function CardPicker({
                     className={`picker-card picker-card--${suit}${index === 6 ? " picker-card--row-break" : ""}`}
                     disabled={!activeTarget || unavailable}
                     key={`${rank}-${suit}`}
-                    aria-label={`${cardAccessibleName(rank, suit)}${unavailable ? ", unavailable" : ""}`}
+                    aria-label={`${cardAccessibleName(rank, suit)}${unavailable ? ", unavailable: all configured copies are already observed" : ""}`}
+                    aria-describedby={!activeTarget ? "assignment-prompt" : unavailable ? "card-picker-note" : undefined}
                     onClick={() => activeTarget && onKnownCard(activeTarget, card)}
                   >
                     <span>{rank}</span>
@@ -97,13 +98,14 @@ export default function CardPicker({
           className="unknown-card-button"
           disabled={!activeTarget}
           aria-label="Assign unknown card"
+          aria-describedby={!activeTarget ? "assignment-prompt" : undefined}
           onClick={() => activeTarget && onUnknownCard(activeTarget)}
         >
           <strong aria-hidden="true">?</strong>
           <span>Unknown</span>
         </button>
       </div>
-      <p className="picker-note">
+      <p id="card-picker-note" className="picker-note">
         Used copies are disabled for known deck counts. Python validation remains authoritative.
       </p>
     </section>

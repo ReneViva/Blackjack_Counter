@@ -16,7 +16,7 @@ import type { SessionState } from "../../state/gameReducer";
 import { selectTableState } from "../../state/selectors";
 import ShoeStatus from "../table/ShoeStatus";
 
-type RequestStatus = "idle" | "updating" | "settled";
+type RequestStatus = "idle" | "updating" | "current" | "incomplete" | "unavailable";
 type AnalysisSidebarProps = Readonly<{ state: SessionState }>;
 
 function percentage(value: number): string {
@@ -79,6 +79,7 @@ export default function AnalysisSidebar({ state }: AnalysisSidebarProps) {
 
         if (analysisResult.status === "fulfilled" && analysisResult.value !== null) {
           setAnalysis(analysisResult.value);
+          setStatus("current");
           setAnalysisMessage(
             "scenarios" in analysisResult.value
               ? "Exact reference has multiple explicit rule scenarios. Open advanced analysis for the unaggregated results."
@@ -86,6 +87,7 @@ export default function AnalysisSidebar({ state }: AnalysisSidebarProps) {
           );
         } else if (analysisResult.status === "rejected") {
           setAnalysis(null);
+          setStatus("unavailable");
           const error = analysisResult.reason as unknown;
           setAnalysisMessage(
             error instanceof AnalysisApiError
@@ -94,6 +96,7 @@ export default function AnalysisSidebar({ state }: AnalysisSidebarProps) {
           );
         } else {
           setAnalysis(null);
+          setStatus("incomplete");
           setAnalysisMessage("Waiting for a known deck, two primary-hand cards, and a dealer observation.");
         }
 
@@ -109,7 +112,6 @@ export default function AnalysisSidebar({ state }: AnalysisSidebarProps) {
               : "Research scores unavailable for the current state.",
           );
         }
-        setStatus("settled");
       });
     }, 220);
 
@@ -124,6 +126,13 @@ export default function AnalysisSidebar({ state }: AnalysisSidebarProps) {
   const aceInformation = scores
     .map((score) => score.ace_information)
     .find((item) => item !== null) ?? null;
+  const statusText: Record<RequestStatus, string> = {
+    idle: "Awaiting table state",
+    updating: "Updating from Python…",
+    current: "Analysis current",
+    incomplete: "Analysis needs more observations",
+    unavailable: "Analysis unavailable",
+  };
 
   return (
     <aside className="workspace-panel analysis-sidebar" aria-labelledby="analysis-sidebar-title">
@@ -135,9 +144,9 @@ export default function AnalysisSidebar({ state }: AnalysisSidebarProps) {
         <span className="panel-icon" aria-hidden="true">∑</span>
       </div>
 
-      <div className="analysis-update-status" aria-live="polite">
+      <div className="analysis-update-status" role="status" aria-live="polite" aria-atomic="true">
         <span className={`status-dot status-dot--${status}`} aria-hidden="true" />
-        {status === "updating" ? "Updating from Python…" : status === "settled" ? "Analysis current" : "Awaiting table state"}
+        {statusText[status]}
       </div>
 
       <section className="analysis-block exact-reference" aria-labelledby="exact-reference-title">
@@ -147,9 +156,9 @@ export default function AnalysisSidebar({ state }: AnalysisSidebarProps) {
         </div>
         {exact ? (
           <dl className="probability-list">
-            <div className="probability probability--win"><dt>Win</dt><progress aria-label="Exact win probability" max={1} value={exact.outcomes.win} /><dd>{percentage(exact.outcomes.win)}</dd></div>
-            <div className="probability probability--push"><dt>Push</dt><progress aria-label="Exact push probability" max={1} value={exact.outcomes.push} /><dd>{percentage(exact.outcomes.push)}</dd></div>
-            <div className="probability probability--loss"><dt>Loss</dt><progress aria-label="Exact loss probability" max={1} value={exact.outcomes.loss} /><dd>{percentage(exact.outcomes.loss)}</dd></div>
+            <div className="probability probability--win"><dt>Win</dt><progress aria-label="Exact win probability" aria-valuetext={percentage(exact.outcomes.win)} max={1} value={exact.outcomes.win} /><dd>{percentage(exact.outcomes.win)}</dd></div>
+            <div className="probability probability--push"><dt>Push</dt><progress aria-label="Exact push probability" aria-valuetext={percentage(exact.outcomes.push)} max={1} value={exact.outcomes.push} /><dd>{percentage(exact.outcomes.push)}</dd></div>
+            <div className="probability probability--loss"><dt>Loss</dt><progress aria-label="Exact loss probability" aria-valuetext={percentage(exact.outcomes.loss)} max={1} value={exact.outcomes.loss} /><dd>{percentage(exact.outcomes.loss)}</dd></div>
           </dl>
         ) : <p className="calm-status">{analysisMessage}</p>}
       </section>

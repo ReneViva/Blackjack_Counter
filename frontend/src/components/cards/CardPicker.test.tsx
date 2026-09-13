@@ -54,6 +54,6 @@ describe("card assignment panel", () => {
     expect(screen.getByRole("button", { name: "Eight of hearts" })).toBeEnabled();
 
     rerender(<CardPicker activeTarget={{ kind: "dealer" }} decks={2} table={table({ dealerCards: [used, used] })} onKnownCard={vi.fn()} onUnknownCard={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "Eight of hearts, unavailable" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Eight of hearts, unavailable: all configured copies are already observed" })).toBeDisabled();
   });
 });

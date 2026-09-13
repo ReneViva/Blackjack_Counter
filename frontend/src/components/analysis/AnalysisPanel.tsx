@@ -83,14 +83,15 @@ export default function AnalysisPanel({ state }: AnalysisPanelProps) {
     }
   };
 
-  return <section className="panel analysis-panel" aria-labelledby="analysis-heading">
+  return <section className="panel analysis-panel" aria-labelledby="analysis-heading" aria-busy={status === "calculating"}>
     <div className="section-heading"><div><p className="eyebrow">Probability methods</p><h2 id="analysis-heading">Dealer-completion analysis</h2></div><span>{method === "exact" ? "Exact result · sampling CI not applicable" : "Finite-shoe Monte Carlo sampling"}</span></div>
     <p className="analysis-note">Holds the observed user hand fixed. Hidden cards are integrated exactly or sampled from finite multiplicities; model scenarios remain separate.</p>
     <div className="analysis-controls"><label>Analysis method<select aria-label="Analysis method" value={method} onChange={(event) => setMethod(event.target.value as AnalysisMethod)}><option value="exact">Exact</option><option value="monte_carlo">Monte Carlo</option><option value="compare">Compare Both</option></select></label>
       {method !== "exact" && <><label>Simulation trials<input aria-label="Simulation trials" type="number" min="1" max="1000000" value={simulations} onChange={(event) => setSimulations(Number(event.target.value))} /></label><label>Monte Carlo sampling confidence<select aria-label="Monte Carlo sampling confidence" value={confidenceLevel} onChange={(event) => setConfidenceLevel(Number(event.target.value) as ConfidenceLevel)}><option value={0.9}>90%</option><option value={0.95}>95%</option><option value={0.99}>99%</option></select></label><label>Random seed (optional)<input aria-label="Random seed (optional)" type="number" value={seed} onChange={(event) => setSeed(event.target.value)} /></label></>}
     </div>
-    <button className="button-primary" type="button" disabled={status === "calculating"} onClick={() => void runAnalysis()}>{status === "calculating" ? "Running analysis..." : "Run analysis"}</button>
-    {status === "error" && <p className="analysis-error" role="alert">{error}</p>}
+    <button className="button-primary" type="button" disabled={status === "calculating"} aria-describedby={status === "error" ? "analysis-request-error" : undefined} onClick={() => void runAnalysis()}>{status === "calculating" ? "Running analysis..." : "Run analysis"}</button>
+    {status === "calculating" && <p className="request-status" role="status">Exact finite-shoe analysis is calculating.</p>}
+    {status === "error" && <p id="analysis-request-error" className="analysis-error" role="alert">{error}</p>}
     {status === "success" && result && <div className="analysis-result" aria-live="polite">{isScenarioResult(result) ? <ScenarioResults result={result} /> : <SingleResult result={result} />}</div>}
   </section>;
 }

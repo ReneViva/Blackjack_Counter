@@ -1,3 +1,5 @@
+import { useEffect, useRef } from "react";
+
 import type { ObservedCard } from "../../domain/card";
 import type { TableTarget } from "../../domain/events";
 import type { SeatNumber } from "../../domain/game";
@@ -22,10 +24,19 @@ export default function PlayerSeat({
   onSelect,
   seat,
 }: PlayerSeatProps) {
+  const targetButton = useRef<HTMLButtonElement | null>(null);
+  const wasOccupied = useRef(isOccupied);
+
+  useEffect(() => {
+    if (!wasOccupied.current && isOccupied) targetButton.current?.focus();
+    wasOccupied.current = isOccupied;
+  }, [isOccupied]);
+
   return (
-    <section className={`table-position player-seat player-seat--${seat}${active ? " table-position--active" : ""}`}>
+    <div className={`table-position player-seat player-seat--${seat}${active ? " table-position--active" : ""}`}>
       {isOccupied ? (
         <button
+          ref={targetButton}
           type="button"
           className="target-button"
           aria-label={`Seat ${seat}, occupied${isUser ? ", primary hand" : ""}${active ? ", active target" : ""}`}
@@ -50,12 +61,12 @@ export default function PlayerSeat({
         </button>
       )}
       {isOccupied && (
-        <div className="table-card-row" aria-label={`Seat ${seat} observed cards`}>
+        <div className="table-card-row" aria-label={`Seat ${seat} observed cards`} aria-live="polite">
           {cards.map((card, index) => (
             <PlayingCard card={card} key={`${card.kind}-${index}`} compact />
           ))}
         </div>
       )}
-    </section>
+    </div>
   );
 }
