@@ -27,6 +27,10 @@ import {
 import type { SessionState } from "../../state/gameReducer";
 import type { TableTarget } from "../../domain/events";
 import { selectTableState } from "../../state/selectors";
+import {
+  ResearchComparisonTable,
+  ResearchSystemCards,
+} from "../research/ResearchInterpretation";
 import ShoeStatus from "../table/ShoeStatus";
 
 type RequestStatus = "idle" | "updating" | "current" | "incomplete" | "unavailable";
@@ -450,23 +454,22 @@ export default function AnalysisSidebar({ activeTarget = null, state }: Analysis
         <div className="analysis-block__title">
           <div><span className="analysis-kicker">Source-backed</span><h3 id="research-current-title">Research systems</h3></div>
         </div>
-        <div className="research-score-list">
-          {RESEARCH_DEFINITIONS.map((summary) => {
-            const score = scores.find((item) => item.definition.identifier === summary.id);
-            return (
-              <article className="research-score-card" key={summary.id}>
-                <div><h4>{summary.label}</h4><span>{score ? (score.complete ? "Complete" : "Incomplete") : "Pending"}</span></div>
-                <p className="research-score-value">{score?.raw_score_fraction ?? "—"}</p>
-                <small>{score ? `Raw research score · PE ${score.definition.published_metrics.pe.toFixed(2)} · BC ${score.definition.published_metrics.bc.toFixed(2)} · IC ${score.definition.published_metrics.ic.toFixed(2)}` : "Awaiting Python research response"}</small>
-              </article>
-            );
-          })}
-        </div>
+        <p className="research-interpretation-note">Raw research scores summarize source-backed observed-card weights. They are not probabilities or action instructions.</p>
+        {scores.length > 0 && <>
+          <ResearchSystemCards
+            scores={scores}
+            exactOutcomes={exact?.outcomes ?? null}
+            deckSummaries={exactScenarios?.deck_count_summaries ?? []}
+            unavailableMessage={analysisMessage}
+          />
+          <ResearchComparisonTable scores={scores} />
+        </>}
         {!research && <p className="calm-status">{researchMessage}</p>}
       </section>
 
       <section className="analysis-block ace-information" aria-labelledby="ace-information-title">
         <div className="analysis-block__title"><div><span className="analysis-kicker">Auxiliary feature</span><h3 id="ace-information-title">Ace Information</h3></div></div>
+        <p className="forecast-note">Separate auxiliary research information, not a fourth primary counting system.</p>
         {aceInformation ? (
           <dl className="ace-facts">
             <div><dt>Known aces observed</dt><dd>{aceInformation.known_aces_observed}</dd></div>

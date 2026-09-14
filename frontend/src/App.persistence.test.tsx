@@ -144,7 +144,12 @@ describe("application session persistence", () => {
         "http://127.0.0.1:8000/api/research/compare",
       ]));
     }, { timeout: 1500 });
-    expect(await screen.findByText("40.0%", {}, { timeout: 1500 })).toBeVisible();
+    const exactReference = screen.getByRole("region", {
+      name: "Finite-shoe outcomes",
+    });
+    expect(
+      await within(exactReference).findByText("40.0%", {}, { timeout: 1500 }),
+    ).toBeVisible();
   });
 
   it("restores locally valid state while the backend is offline without deleting it", async () => {

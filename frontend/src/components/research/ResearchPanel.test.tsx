@@ -151,19 +151,23 @@ describe("ResearchPanel", () => {
     expect(screen.getByLabelText("Research seed")).toBeRequired();
   });
 
-  it("renders current raw score, incomplete state, Ace auxiliary, provenance, and separate exact reference", async () => {
+  it("renders interpreted raw score, auxiliary Ace data, provenance, and shared exact reference", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(comparisonResponse())));
     render(<ResearchPanel state={session()} />);
     fireEvent.click(screen.getByLabelText(/Include Ace Information/));
     fireEvent.click(screen.getByRole("button", { name: "Compare current state" }));
 
-    expect(await screen.findByText("Approved counting systems research package")).toBeVisible();
-    expect(screen.getByRole("table", { name: "Raw research scores" })).toHaveTextContent("1/2");
-    expect(screen.getByRole("table", { name: "Raw research scores" })).toHaveTextContent("Incomplete · 1 unresolved");
-    expect(screen.getByRole("table", { name: "Raw research scores" })).toHaveTextContent("1 observed; unknown remaining");
-    expect(screen.getByRole("heading", { name: "Exact finite-shoe probability reference" })).toBeVisible();
-    expect(screen.getByText("40.00%")).toBeVisible();
-    expect(screen.getByText("Published source metadata")).toBeVisible();
+    const heading = await screen.findByRole("heading", { name: "Wong Halves" });
+    const card = heading.closest("article");
+    expect(card).not.toBeNull();
+    expect(card).toHaveTextContent("Approved counting systems research package");
+    expect(card).toHaveTextContent("Raw research score · canonical fraction1/2");
+    expect(card).toHaveTextContent("Decimal0.5");
+    expect(card).toHaveTextContent("Incomplete");
+    expect(within(card as HTMLElement).getByLabelText("Current exact physical-state probability reference")).toHaveTextContent("40.0%");
+    expect(card).toHaveTextContent("Published static metrics");
+    expect(screen.getByRole("heading", { name: "Ace Information" })).toBeVisible();
+    expect(screen.getByText(/not a fourth primary system/)).toBeVisible();
   });
 
   it("sends one bounded batch request and renders computed metrics and unavailable cases safely", async () => {

@@ -3,7 +3,13 @@ from fastapi.responses import JSONResponse
 
 from app.domain import DealerCheckResult
 from app.engine import ReconstructedTableState, build_table_state, validate_table_state
-from app.probability import ExactAnalysisError, analyze_exact_table, concrete_scenarios
+from app.probability import (
+    ExactAnalysisError,
+    OutcomeDistribution,
+    analyze_exact_table,
+    concrete_scenarios,
+    summarize_outcomes,
+)
 from app.research import (
     ACE_INFORMATION,
     EXPERIMENT_VERSION,
@@ -20,6 +26,9 @@ from app.schemas import (
     APIErrorResponse,
     AceInformationResponse,
     OutcomeProbabilities,
+    OutcomeRangesResponse,
+    ProbabilityRangeResponse,
+    ExcludedDeckCountResponse,
     PublishedResearchMetricsResponse,
     ResearchBatchCaseResponse,
     ResearchBatchRequest,
@@ -34,6 +43,7 @@ from app.schemas import (
     ResearchScoreResponse,
     ResearchSourceResponse,
     ScenarioAssumptionsResponse,
+    UniformDeckCountSummaryResponse,
 )
 
 
@@ -143,22 +153,166 @@ def _scenario_exact_reference(
     payload: ResearchComparisonRequest,
 ) -> ResearchExactScenarioAnalysisResponse:
     plan = concrete_scenarios(payload.state)
+    scenarios: list[ResearchExactScenarioResponse] = []
+    for scenario in plan.scenarios:
+        assumptions = ScenarioAssumptionsResponse(
+            decks=scenario.assumptions.decks,
+            dealer_soft_17=scenario.assumptions.dealer_soft_17,
+        )
+        concrete_state = build_table_state(scenario.state)
+        validation = validate_table_state(concrete_state)
+        if not validation.valid:
+            issue = validation.errors[0]
+            scenarios.append(
+                ResearchExactScenarioResponse(
+                    assumptions=assumptions,
+                    status="invalid",
+                    reference=ResearchExactReferenceResponse(
+                        status="unavailable",
+                        error=APIErrorDetail(
+                            code=issue.code,
+                            message=issue.message,
+                            field=issue.field,
+                        ),
+                    ),
+                )
+            )
+            continue
+        reference = _exact_reference(
+            concrete_state, payload.options.dealer_check_result
+        )
+        scenarios.append(
+            ResearchExactScenarioResponse(
+                assumptions=assumptions,
+                status=(
+                    "complete"
+                    if reference.status == "complete"
+                    else "unavailable"
+                ),
+                reference=reference,
+            )
+        )
     return ResearchExactScenarioAnalysisResponse(
         model_uncertainty=list(plan.uncertainty),
-        scenarios=[
-            ResearchExactScenarioResponse(
-                assumptions=ScenarioAssumptionsResponse(
-                    decks=scenario.assumptions.decks,
-                    dealer_soft_17=scenario.assumptions.dealer_soft_17,
+        scenarios=scenarios,
+        deck_count_summaries=(
+            _research_deck_summaries(scenarios)
+            if "deck_count" in plan.uncertainty
+            else []
+        ),
+    )
+
+
+def _research_deck_summaries(
+    scenarios: list[ResearchExactScenarioResponse],
+) -> list[UniformDeckCountSummaryResponse]:
+    summaries: list[UniformDeckCountSummaryResponse] = []
+    rules = sorted(
+        {scenario.assumptions.dealer_soft_17 for scenario in scenarios},
+        key=lambda value: value.value,
+    )
+    for rule in rules:
+        group = [
+            scenario
+            for scenario in scenarios
+            if scenario.assumptions.dealer_soft_17 is rule
+        ]
+        included = sorted(
+            scenario.assumptions.decks
+            for scenario in group
+            if scenario.status != "invalid"
+        )
+        excluded = [
+            ExcludedDeckCountResponse(
+                deck_count=scenario.assumptions.decks,
+                code=(
+                    scenario.reference.error.code
+                    if scenario.reference.error
+                    else "invalid_model"
                 ),
-                reference=_exact_reference(
-                    build_table_state(scenario.state),
-                    payload.options.dealer_check_result,
+                message=(
+                    scenario.reference.error.message
+                    if scenario.reference.error
+                    else "The deck-count model is physically invalid."
                 ),
             )
-            for scenario in plan.scenarios
-        ],
-    )
+            for scenario in group
+            if scenario.status == "invalid"
+        ]
+        base = dict(
+            dealer_soft_17=rule,
+            candidate_deck_counts=list(range(1, 9)),
+            included_deck_counts=included,
+            excluded_deck_counts=excluded,
+        )
+        if not included:
+            summaries.append(
+                UniformDeckCountSummaryResponse(
+                    **base,
+                    status="unavailable",
+                    error=APIErrorDetail(
+                        code="no_valid_deck_models",
+                        message="No physically valid deck-count models are available.",
+                    ),
+                )
+            )
+            continue
+        complete = [
+            scenario
+            for scenario in group
+            if scenario.status == "complete"
+            and scenario.reference.outcomes is not None
+        ]
+        if len(complete) != len(included):
+            summaries.append(
+                UniformDeckCountSummaryResponse(
+                    **base,
+                    status="unavailable",
+                    error=APIErrorDetail(
+                        code="deck_model_analysis_unavailable",
+                        message=(
+                            "At least one valid deck-count model could not be "
+                            "evaluated within the exact resource limit."
+                        ),
+                    ),
+                )
+            )
+            continue
+        model_summary = summarize_outcomes(
+            OutcomeDistribution(
+                win=scenario.reference.outcomes.win,
+                push=scenario.reference.outcomes.push,
+                loss=scenario.reference.outcomes.loss,
+            )
+            for scenario in complete
+            if scenario.reference.outcomes is not None
+        )
+        summaries.append(
+            UniformDeckCountSummaryResponse(
+                **base,
+                status="available",
+                outcomes=OutcomeProbabilities(
+                    win=model_summary.outcomes.win,
+                    push=model_summary.outcomes.push,
+                    loss=model_summary.outcomes.loss,
+                ),
+                ranges=OutcomeRangesResponse(
+                    win=ProbabilityRangeResponse(
+                        minimum=model_summary.win_range.minimum,
+                        maximum=model_summary.win_range.maximum,
+                    ),
+                    push=ProbabilityRangeResponse(
+                        minimum=model_summary.push_range.minimum,
+                        maximum=model_summary.push_range.maximum,
+                    ),
+                    loss=ProbabilityRangeResponse(
+                        minimum=model_summary.loss_range.minimum,
+                        maximum=model_summary.loss_range.maximum,
+                    ),
+                ),
+            )
+        )
+    return summaries
 
 
 @router.post(

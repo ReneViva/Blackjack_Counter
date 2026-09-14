@@ -5,7 +5,6 @@ import {
   ResearchApiError,
   compareResearch,
   runResearchBatch,
-  type ExactReference,
   type ResearchBatchResponse,
   type ResearchComparisonResponse,
   type ResearchDefinition,
@@ -18,6 +17,10 @@ import {
   type ResearchBatchExportRequest,
 } from "../../replay/researchExport";
 import type { SessionState } from "../../state/gameReducer";
+import {
+  ResearchComparisonTable,
+  ResearchSystemCards,
+} from "./ResearchInterpretation";
 
 type RequestStatus = "idle" | "loading" | "success" | "error";
 type ResearchPanelProps = Readonly<{ state: SessionState }>;
@@ -40,14 +43,6 @@ function DefinitionCards({ definitions }: { definitions: readonly ResearchDefini
       <div className="metadata-box"><strong>Published source metadata</strong><span>PE {definition.published_metrics.pe.toFixed(2)} · BC {definition.published_metrics.bc.toFixed(2)} · IC {definition.published_metrics.ic.toFixed(2)}</span></div>
     </article>
   ))}</div>;
-}
-
-function ExactReferenceView({ reference }: { reference: ExactReference | null }) {
-  if (!reference) return <p>Exact reference was not requested.</p>;
-  if (reference.status === "unavailable" || !reference.outcomes) {
-    return <p className="status-unavailable">Exact reference unavailable: {reference.error?.message ?? "No result returned."}</p>;
-  }
-  return <dl className="compact-outcomes"><div><dt>Win</dt><dd>{probability(reference.outcomes.win)}</dd></div><div><dt>Push</dt><dd>{probability(reference.outcomes.push)}</dd></div><div><dt>Loss</dt><dd>{probability(reference.outcomes.loss)}</dd></div></dl>;
 }
 
 export default function ResearchPanel({ state }: ResearchPanelProps) {
@@ -155,6 +150,12 @@ export default function ResearchPanel({ state }: ResearchPanelProps) {
   const currentExact = current?.exact_reference && "status" in current.exact_reference
     ? current.exact_reference
     : null;
+  const currentScenarios = current?.exact_reference && "scenarios" in current.exact_reference
+    ? current.exact_reference
+    : null;
+  const currentAceInformation = current?.scores
+    .map((score) => score.ace_information)
+    .find((item) => item !== null) ?? null;
   const currentSelectionInvalid = currentStatus === "error" && currentError?.startsWith("Select at least") === true;
   const batchSelectionInvalid = batchStatus === "error" && batchError?.startsWith("Select at least") === true;
   const caseCountInvalid = batchStatus === "error" && batchError?.startsWith("Case count") === true;
@@ -179,7 +180,22 @@ export default function ResearchPanel({ state }: ResearchPanelProps) {
       <button type="button" onClick={() => void runCurrent()} disabled={currentStatus === "loading"} aria-describedby={currentStatus === "error" ? "research-current-error" : undefined}>{currentStatus === "loading" ? "Comparing current state..." : "Compare current state"}</button>
       {currentStatus === "loading" && <p className="request-status" role="status">Comparing current-state research scores.</p>}
       {currentStatus === "error" && <p id="research-current-error" className="analysis-error" role="alert">{currentError}</p>}
-      {current && <div className="research-results" aria-live="polite"><DefinitionCards definitions={current.scores.map((score) => score.definition)} /><div className="table-scroll"><table><caption>Raw research scores</caption><thead><tr><th>System</th><th>Raw score</th><th>Known observations</th><th>Status</th><th>Ace Information</th></tr></thead><tbody>{current.scores.map((score) => <tr key={score.definition.identifier}><th scope="row">{score.definition.label}</th><td>{score.raw_score_fraction}</td><td>{score.observed_known_cards}</td><td>{score.complete ? "Complete" : `Incomplete · ${score.unresolved_unknown_cards} unresolved`}</td><td>{score.ace_information ? `${score.ace_information.known_aces_observed} observed; ${score.ace_information.exact_aces_remaining ?? "unknown"} remaining` : "Not requested"}</td></tr>)}</tbody></table></div><div className="exact-reference"><h3>Exact finite-shoe probability reference</h3><ExactReferenceView reference={currentExact} />{current?.exact_reference && !("status" in current.exact_reference) && <p>Model uncertainty is returned as separate, unaveraged scenarios.</p>}</div></div>}
+      {current && <div className="research-results" aria-live="polite">
+        <p className="research-interpretation-note">The research score is the sum of each system&apos;s source-backed card weights over the simulated observed-card state. It is not a win probability or action recommendation.</p>
+        <ResearchSystemCards
+          scores={current.scores}
+          exactOutcomes={currentExact?.status === "complete" ? currentExact.outcomes : null}
+          deckSummaries={currentScenarios?.deck_count_summaries ?? []}
+          unavailableMessage={currentExact?.error?.message ?? null}
+        />
+        <ResearchComparisonTable scores={current.scores} />
+        {currentAceInformation && <section className="research-ace-auxiliary" aria-labelledby="research-ace-auxiliary-title">
+          <p className="eyebrow">Auxiliary research information</p>
+          <h3 id="research-ace-auxiliary-title">Ace Information</h3>
+          <p>Ace Information remains separate from Wong Halves, Zen Count, and Omega II; it is not a fourth primary system.</p>
+          <dl className="compact-outcomes"><div><dt>Known aces observed</dt><dd>{currentAceInformation.known_aces_observed}</dd></div><div><dt>Exact aces remaining</dt><dd>{currentAceInformation.exact_aces_remaining ?? "Unknown"}</dd></div></dl>
+        </section>}
+      </div>}
     </section>
 
     <section className="research-section" aria-busy={batchStatus === "loading"}>

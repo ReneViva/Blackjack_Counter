@@ -245,7 +245,7 @@ def test_exact_reference_remains_separate_from_research_score() -> None:
     assert "raw_score" not in payload["exact_reference"]
 
 
-def test_unknown_deck_preserves_exact_scenarios_without_aggregation() -> None:
+def test_unknown_deck_preserves_scenarios_and_adds_valid_model_summary() -> None:
     state = {
         "rules": {"decks": None, "dealer_soft_17": "stand"},
         "dealer": {"cards": [known("6", "S")]},
@@ -273,11 +273,138 @@ def test_unknown_deck_preserves_exact_scenarios_without_aggregation() -> None:
     exact = response.json()["exact_reference"]
     assert exact["model_uncertainty"] == ["deck_count"]
     assert exact["aggregation"] == "none"
+    assert exact["resource_limit_scope"] == "per_scenario"
+    assert exact["exact_state_limit_per_scenario"] == 2_000_000
     assert len(exact["scenarios"]) == 8
     assert all(
         item["reference"]["status"] == "complete"
         for item in exact["scenarios"]
     )
+    assert exact["deck_count_summaries"][0]["included_deck_counts"] == list(
+        range(1, 9)
+    )
+    assert exact["deck_count_summaries"][0]["excluded_deck_counts"] == []
+    assert exact["deck_count_summaries"][0]["status"] == "available"
+
+
+def test_unknown_deck_reference_excludes_impossible_small_model_honestly() -> None:
+    repeated = known("A", "S")
+    state = {
+        "rules": {"decks": None, "dealer_soft_17": "stand"},
+        "dealer": {"cards": [known("6", "D"), known("10", "H")]},
+        "players": [
+            {
+                "seat": 1,
+                "is_user": True,
+                "cards": [repeated, repeated],
+            }
+        ],
+        "discarded_cards": [],
+    }
+    response = client.post(
+        "/api/research/compare",
+        json=request_for(
+            ["wong_halves", "zen_count", "omega_ii"],
+            state=state,
+            include_exact_reference=True,
+        ),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    reference = payload["exact_reference"]
+    assert [score["raw_score_fraction"] for score in payload["scores"]] == [
+        "-2",
+        "-2",
+        "0",
+    ]
+    one_deck = reference["scenarios"][0]
+    assert one_deck["status"] == "invalid"
+    assert one_deck["reference"]["outcomes"] is None
+    assert one_deck["reference"]["error"]["code"] == (
+        "exact_card_multiplicity_exceeded"
+    )
+    summary = reference["deck_count_summaries"][0]
+    assert summary["included_deck_counts"] == [2, 3, 4, 5, 6, 7, 8]
+    assert summary["excluded_deck_counts"][0]["deck_count"] == 1
+    assert summary["excluded_deck_counts"][0]["code"] == (
+        "exact_card_multiplicity_exceeded"
+    )
+    assert summary["outcomes"] != {"win": 0.0, "push": 0.0, "loss": 0.0}
+
+
+def test_all_systems_share_one_exact_physical_reference() -> None:
+    response = client.post(
+        "/api/research/compare",
+        json=request_for(
+            ["wong_halves", "zen_count", "omega_ii"],
+            state=exact_micro_state(),
+            include_exact_reference=True,
+        ),
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["exact_reference"]["outcomes"] == {
+        "win": 0.5,
+        "push": 0.0,
+        "loss": 0.5,
+    }
+    assert len(payload["scores"]) == 3
+    assert all("outcomes" not in score for score in payload["scores"])
+    assert len({score["raw_score_fraction"] for score in payload["scores"]}) > 1
+
+
+def test_published_metrics_are_static_across_current_table_states() -> None:
+    first = client.post(
+        "/api/research/compare", json=request_for(["omega_ii"])
+    ).json()["scores"][0]["definition"]["published_metrics"]
+    second = client.post(
+        "/api/research/compare",
+        json=request_for(["omega_ii"], state=exact_micro_state()),
+    ).json()["scores"][0]["definition"]["published_metrics"]
+
+    assert first == second == {
+        "kind": "published_static_metadata",
+        "pe": 0.67,
+        "bc": 0.92,
+        "ic": 0.85,
+    }
+
+
+def test_unknown_soft_17_keeps_two_separate_physical_model_families() -> None:
+    state = {
+        "rules": {"decks": None, "dealer_soft_17": None},
+        "dealer": {"cards": [known("6", "S")]},
+        "players": [
+            {
+                "seat": 1,
+                "is_user": True,
+                "cards": [known("K", "H"), known("Q", "D"), known("2", "C")],
+            }
+        ],
+        "discarded_cards": [],
+    }
+    response = client.post(
+        "/api/research/compare",
+        json=request_for(
+            ["zen_count"], state=state, include_exact_reference=True
+        ),
+    )
+
+    assert response.status_code == 200
+    reference = response.json()["exact_reference"]
+    assert len(reference["scenarios"]) == 16
+    assert len(reference["deck_count_summaries"]) == 2
+    assert {
+        summary["dealer_soft_17"]
+        for summary in reference["deck_count_summaries"]
+    } == {"stand", "hit"}
+    assert all(
+        summary["candidate_deck_counts"] == list(range(1, 9))
+        for summary in reference["deck_count_summaries"]
+    )
+    assert "outcomes" not in reference
 
 
 def test_semantically_invalid_state_is_rejected() -> None:

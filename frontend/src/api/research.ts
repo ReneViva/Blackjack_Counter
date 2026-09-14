@@ -1,5 +1,6 @@
 import type { SessionState } from "../state/gameReducer";
 import type { TableTarget } from "../domain/events";
+import type { UniformDeckCountSummary } from "./analysis";
 import { getApiBaseUrl } from "./client";
 import { toTableStatePayload } from "./tableState";
 
@@ -57,11 +58,18 @@ export type ExactReference = Readonly<{
   error: ApiErrorDetail | null;
 }>;
 
-type ScenarioExactReference = Readonly<{
+export type ScenarioExactReference = Readonly<{
   method: "exact";
-  model_uncertainty: readonly string[];
+  model_uncertainty: readonly ("deck_count" | "dealer_soft_17")[];
   aggregation: "none";
-  scenarios: readonly unknown[];
+  resource_limit_scope: "per_scenario";
+  exact_state_limit_per_scenario: number;
+  scenarios: readonly Readonly<{
+    assumptions: Readonly<{ decks: number; dealer_soft_17: "hit" | "stand" }>;
+    status: "complete" | "invalid" | "unavailable";
+    reference: ExactReference;
+  }>[];
+  deck_count_summaries: readonly UniformDeckCountSummary[];
 }>;
 
 export type ResearchComparisonResponse = Readonly<{

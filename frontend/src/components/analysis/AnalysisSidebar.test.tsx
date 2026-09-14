@@ -316,11 +316,11 @@ describe("automatic analysis sidebar", () => {
 
     expect(screen.getByText("Updating from Python…")).toBeVisible();
     expect(await screen.findByLabelText("Exact win probability", {}, { timeout: 1500 })).toHaveAttribute("aria-valuetext", "50.0%");
-    expect(screen.getAllByText("2/1")).toHaveLength(3);
+    expect(screen.getAllByText("2/1")).toHaveLength(6);
     expect(screen.getByText("Known aces observed").nextSibling).toHaveTextContent("1");
-    expect(screen.getByText("Wong Halves")).toBeVisible();
-    expect(screen.getByText("Zen Count")).toBeVisible();
-    expect(screen.getByText("Omega II")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Wong Halves" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Zen Count" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Omega II" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Selected-hand outcomes" })).toBeVisible();
     expect(screen.getByLabelText("Stand now forecast")).toHaveTextContent("40.0%");
     expect(screen.getByLabelText("Hit once, then stand forecast")).toHaveTextContent("20.0%");
@@ -342,7 +342,7 @@ describe("automatic analysis sidebar", () => {
     ]));
     expect(screen.queryByText(/Suggested (Hit|Stand|Double|Split)/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Better|Best|Recommended|Choose|Optimal/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Payout|Wager|Stake|Expected value|Advantage/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Payout|Wager|Stake|Expected value|Bet size|Player advantage is/i)).not.toBeInTheDocument();
   });
 
   it("shows understandable loading and unavailable states for forecasts", async () => {
@@ -506,13 +506,13 @@ describe("automatic analysis sidebar", () => {
       card: { kind: "known", rank: "A", suit: "clubs" },
     });
     rerender(<AnalysisSidebar state={newer} />);
-    expect(await screen.findByText("80.0%", {}, { timeout: 1500 })).toBeVisible();
-    expect(screen.getAllByText("8/1")).toHaveLength(3);
+    expect(await screen.findAllByText("80.0%", {}, { timeout: 1500 })).toHaveLength(4);
+    expect(screen.getAllByText("8/1")).toHaveLength(6);
 
     oldResolvers[0](exactResponse(.1));
     oldResolvers[1](researchResponse(1));
     await new Promise((resolve) => window.setTimeout(resolve, 30));
-    expect(screen.getByText("80.0%")).toBeVisible();
+    expect(screen.getAllByText("80.0%")).toHaveLength(4);
     expect(screen.queryAllByText("1/1")).toHaveLength(0);
   });
 });

@@ -12,7 +12,11 @@ from pydantic import (
 from app.domain import DealerCheckResult, Rank
 
 from .errors import APIErrorDetail
-from .responses import OutcomeProbabilities, ScenarioAssumptionsResponse
+from .responses import (
+    OutcomeProbabilities,
+    ScenarioAssumptionsResponse,
+    UniformDeckCountSummaryResponse,
+)
 from .table import TableStateSchema
 
 
@@ -118,6 +122,7 @@ class ResearchExactScenarioResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     assumptions: ScenarioAssumptionsResponse
+    status: Literal["complete", "invalid", "unavailable"] = "complete"
     reference: ResearchExactReferenceResponse
 
 
@@ -127,7 +132,12 @@ class ResearchExactScenarioAnalysisResponse(BaseModel):
     method: Literal["exact"] = "exact"
     model_uncertainty: list[Literal["deck_count", "dealer_soft_17"]]
     aggregation: Literal["none"] = "none"
+    resource_limit_scope: Literal["per_scenario"] = "per_scenario"
+    exact_state_limit_per_scenario: int = 2_000_000
     scenarios: list[ResearchExactScenarioResponse]
+    deck_count_summaries: list[UniformDeckCountSummaryResponse] = Field(
+        default_factory=list
+    )
 
 
 class ResearchComparisonResponse(BaseModel):
