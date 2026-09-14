@@ -64,6 +64,39 @@ class ExactAnalysisResponse(BaseModel):
     metadata: AnalysisMetadata
 
 
+class ActionForecastTargetResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    seat: int
+    hand_id: str
+
+
+class ExactActionForecastResultResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract: Literal["stand_now", "hit_once_then_stand"]
+    status: Literal["available", "unavailable"]
+    method: Literal["exact"] = "exact"
+    outcomes: OutcomeProbabilities | None = None
+    metadata: AnalysisMetadata | None = None
+    error: APIErrorDetail | None = None
+
+
+class ExactActionForecastsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    stand_now: ExactActionForecastResultResponse
+    hit_once_then_stand: ExactActionForecastResultResponse
+
+
+class ExactActionForecastResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    method: Literal["exact_action_forecast"] = "exact_action_forecast"
+    target: ActionForecastTargetResponse | None = None
+    action_forecasts: ExactActionForecastsResponse
+
+
 class OutcomeCountsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -156,6 +189,23 @@ class ExactScenarioAnalysisResponse(BaseModel):
     model_uncertainty: list[Literal["deck_count", "dealer_soft_17"]]
     aggregation: Literal["none"] = "none"
     scenarios: list[ExactScenarioResponse]
+
+
+class ExactActionForecastScenarioResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    assumptions: ScenarioAssumptionsResponse
+    status: Literal["complete"] = "complete"
+    result: ExactActionForecastResponse
+
+
+class ExactActionForecastScenarioAnalysisResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    method: Literal["exact_action_forecast"] = "exact_action_forecast"
+    model_uncertainty: list[Literal["deck_count", "dealer_soft_17"]]
+    aggregation: Literal["none"] = "none"
+    scenarios: list[ExactActionForecastScenarioResponse]
 
 
 class MonteCarloScenarioResponse(BaseModel):

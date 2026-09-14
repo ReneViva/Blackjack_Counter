@@ -6,6 +6,8 @@ from fastapi.responses import JSONResponse
 from app.engine import build_table_state
 from app.probability import (
     ExactAnalysisError,
+    ExactActionForecast,
+    analyze_exact_action_forecasts,
     analyze_exact_table,
     concrete_scenarios,
     simulate_table,
@@ -24,6 +26,13 @@ from app.schemas import (
     ComparisonOutcomeResponse,
     ComparisonOutcomesResponse,
     ExactAnalysisResponse,
+    ExactActionForecastOptions,
+    ExactActionForecastResponse,
+    ExactActionForecastResultResponse,
+    ExactActionForecastScenarioAnalysisResponse,
+    ExactActionForecastScenarioResponse,
+    ExactActionForecastsResponse,
+    ActionForecastTargetResponse,
     ExactScenarioAnalysisResponse,
     ExactScenarioResponse,
     EstimatedOutcome,
@@ -73,6 +82,73 @@ def _exact_result(payload: AnalysisRequest) -> ExactAnalysisResponse:
             runtime_ms=runtime_ms,
             hidden_states_evaluated=result.hidden_states_evaluated,
             hidden_weight_mass=result.hidden_weight_mass,
+        ),
+    )
+
+
+def _forecast_response(
+    forecast: ExactActionForecast,
+    runtime_ms: float,
+) -> ExactActionForecastResultResponse:
+    if forecast.status == "unavailable":
+        return ExactActionForecastResultResponse(
+            contract=forecast.contract,
+            status="unavailable",
+            error=APIErrorDetail(
+                code=forecast.code or "action_forecast_unavailable",
+                message=forecast.message or "The action forecast is unavailable.",
+            ),
+        )
+    assert forecast.outcomes is not None and forecast.metrics is not None
+    return ExactActionForecastResultResponse(
+        contract=forecast.contract,
+        status="available",
+        outcomes=OutcomeProbabilities(
+            win=forecast.outcomes.win,
+            push=forecast.outcomes.push,
+            loss=forecast.outcomes.loss,
+        ),
+        metadata=AnalysisMetadata(
+            states_evaluated=(
+                forecast.hidden_states_evaluated
+                + forecast.metrics.states_evaluated
+            ),
+            cache_hits=forecast.metrics.cache_hits,
+            cache_misses=forecast.metrics.cache_misses,
+            runtime_ms=runtime_ms,
+            hidden_states_evaluated=forecast.hidden_states_evaluated,
+            hidden_weight_mass=forecast.hidden_weight_mass,
+        ),
+    )
+
+
+def _action_forecast_result(
+    payload: AnalysisRequest,
+) -> ExactActionForecastResponse:
+    assert isinstance(payload.options, ExactActionForecastOptions)
+    started = perf_counter()
+    target = payload.options.target
+    result = analyze_exact_action_forecasts(
+        build_table_state(payload.state),
+        target_seat=target.seat if target is not None else None,
+        target_hand_id=target.hand_id if target is not None else None,
+        dealer_check_result=payload.options.dealer_check_result,
+    )
+    runtime_ms = (perf_counter() - started) * 1000.0
+    return ExactActionForecastResponse(
+        target=(
+            ActionForecastTargetResponse(
+                seat=result.target_seat,
+                hand_id=result.target_hand_id,
+            )
+            if result.target_seat is not None and result.target_hand_id is not None
+            else None
+        ),
+        action_forecasts=ExactActionForecastsResponse(
+            stand_now=_forecast_response(result.stand_now, runtime_ms),
+            hit_once_then_stand=_forecast_response(
+                result.hit_once_then_stand, runtime_ms
+            ),
         ),
     )
 
@@ -181,6 +257,8 @@ def _compare_result(payload: AnalysisRequest) -> CompareAnalysisResponse:
     "/analyze",
     response_model=(
         ExactAnalysisResponse
+        | ExactActionForecastResponse
+        | ExactActionForecastScenarioAnalysisResponse
         | ExactScenarioAnalysisResponse
         | MonteCarloAnalysisResponse
         | MonteCarloScenarioAnalysisResponse
@@ -193,6 +271,8 @@ def analyze_exact(
     payload: AnalysisRequest,
 ) -> (
     ExactAnalysisResponse
+    | ExactActionForecastResponse
+    | ExactActionForecastScenarioAnalysisResponse
     | ExactScenarioAnalysisResponse
     | MonteCarloAnalysisResponse
     | MonteCarloScenarioAnalysisResponse
@@ -203,6 +283,8 @@ def analyze_exact(
     plan = concrete_scenarios(payload.state)
     if not plan.uncertainty:
         try:
+            if isinstance(payload.options, ExactActionForecastOptions):
+                return _action_forecast_result(payload)
             if isinstance(payload.options, CompareAnalysisOptions):
                 return _compare_result(payload)
             if isinstance(payload.options, MonteCarloAnalysisOptions):
@@ -212,6 +294,7 @@ def analyze_exact(
             return _error_response(error)
 
     exact_results: list[ExactScenarioResponse] = []
+    action_forecast_results: list[ExactActionForecastScenarioResponse] = []
     monte_carlo_results: list[MonteCarloScenarioResponse] = []
     compare_results: list[CompareScenarioResponse] = []
     for scenario in plan.scenarios:
@@ -221,7 +304,9 @@ def analyze_exact(
         )
         concrete_request = payload.model_copy(update={"state": scenario.state})
         try:
-            if isinstance(payload.options, CompareAnalysisOptions):
+            if isinstance(payload.options, ExactActionForecastOptions):
+                result = _action_forecast_result(concrete_request)
+            elif isinstance(payload.options, CompareAnalysisOptions):
                 result = _compare_result(concrete_request)
             elif isinstance(payload.options, MonteCarloAnalysisOptions):
                 result = _monte_carlo_result(concrete_request)
@@ -229,7 +314,14 @@ def analyze_exact(
                 result = _exact_result(concrete_request)
         except ExactAnalysisError as error:
             error_detail = APIErrorDetail(code=error.code, message=error.message)
-            if isinstance(payload.options, CompareAnalysisOptions):
+            if isinstance(payload.options, ExactActionForecastOptions):
+                action_forecast_results.append(
+                    ExactActionForecastScenarioResponse(
+                        assumptions=assumptions,
+                        result=_action_forecast_result(concrete_request),
+                    )
+                )
+            elif isinstance(payload.options, CompareAnalysisOptions):
                 compare_results.append(
                     CompareScenarioResponse(
                         assumptions=assumptions,
@@ -254,7 +346,14 @@ def analyze_exact(
                     )
                 )
         else:
-            if isinstance(result, CompareAnalysisResponse):
+            if isinstance(result, ExactActionForecastResponse):
+                action_forecast_results.append(
+                    ExactActionForecastScenarioResponse(
+                        assumptions=assumptions,
+                        result=result,
+                    )
+                )
+            elif isinstance(result, CompareAnalysisResponse):
                 compare_results.append(
                     CompareScenarioResponse(
                         assumptions=assumptions,
@@ -278,6 +377,11 @@ def analyze_exact(
                         result=result,
                     )
                 )
+    if isinstance(payload.options, ExactActionForecastOptions):
+        return ExactActionForecastScenarioAnalysisResponse(
+            model_uncertainty=list(plan.uncertainty),
+            scenarios=action_forecast_results,
+        )
     if isinstance(payload.options, CompareAnalysisOptions):
         return CompareScenarioAnalysisResponse(
             model_uncertainty=list(plan.uncertainty),

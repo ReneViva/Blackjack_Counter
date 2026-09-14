@@ -35,6 +35,14 @@ class ExactAnalysisRequest(BaseModel):
     options: ExactAnalysisOptions = Field(default_factory=ExactAnalysisOptions)
 
 
+class ExactActionForecastOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    method: Literal["exact_action_forecast"] = "exact_action_forecast"
+    target: PlayerHandTargetSchema | None = None
+    dealer_check_result: DealerCheckResult = DealerCheckResult.NOT_REQUIRED
+
+
 class MonteCarloAnalysisOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -56,7 +64,10 @@ class CompareAnalysisOptions(BaseModel):
 
 
 AnalysisOptions = Annotated[
-    ExactAnalysisOptions | MonteCarloAnalysisOptions | CompareAnalysisOptions,
+    ExactAnalysisOptions
+    | ExactActionForecastOptions
+    | MonteCarloAnalysisOptions
+    | CompareAnalysisOptions,
     Field(discriminator="method"),
 ]
 

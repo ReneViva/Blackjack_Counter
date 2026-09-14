@@ -45,6 +45,22 @@ export type ComparisonOutcome = Readonly<{
 }>;
 
 type ErrorDetail = Readonly<{ code: string; message: string; field: string | null }>;
+export type ExactActionForecastResult = Readonly<{
+  contract: "stand_now" | "hit_once_then_stand";
+  status: "available" | "unavailable";
+  method: "exact";
+  outcomes: OutcomeProbabilities | null;
+  metadata: ExactAnalysisResponse["metadata"] | null;
+  error: ErrorDetail | null;
+}>;
+export type ExactActionForecastResponse = Readonly<{
+  method: "exact_action_forecast";
+  target: Readonly<{ seat: number; hand_id: string }> | null;
+  action_forecasts: Readonly<{
+    stand_now: ExactActionForecastResult;
+    hit_once_then_stand: ExactActionForecastResult;
+  }>;
+}>;
 export type CompareAnalysisResponse = Readonly<{
   method: "compare";
   status: "complete" | "exact_unavailable";
@@ -97,6 +113,14 @@ function isAnalysisResponse(value: unknown): value is AnalysisResponse {
     (Array.isArray(candidate.scenarios) || "state_summary" in candidate);
 }
 
+function isActionForecastResponse(value: unknown): value is ExactActionForecastResponse {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as { method?: unknown; action_forecasts?: unknown };
+  return candidate.method === "exact_action_forecast" &&
+    typeof candidate.action_forecasts === "object" &&
+    candidate.action_forecasts !== null;
+}
+
 export async function analyze(state: SessionState, options: AnalysisOptions, signal?: AbortSignal, analysisTarget: TableTarget | null = null): Promise<AnalysisResponse> {
   const response = await fetch(`${getApiBaseUrl()}/analyze`, {
     method: "POST",
@@ -115,4 +139,35 @@ export async function analyze(state: SessionState, options: AnalysisOptions, sig
 
 export function analyzeExact(state: SessionState, signal?: AbortSignal, analysisTarget: TableTarget | null = null): Promise<AnalysisResponse> {
   return analyze(state, { method: "exact" }, signal, analysisTarget);
+}
+
+export async function analyzeActionForecast(
+  state: SessionState,
+  target: Extract<TableTarget, { kind: "player-hand" }> | null,
+  signal?: AbortSignal,
+): Promise<ExactActionForecastResponse> {
+  const response = await fetch(`${getApiBaseUrl()}/analyze`, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({
+      state: toTableStatePayload(state, target),
+      options: {
+        method: "exact_action_forecast",
+        target: target === null ? null : { seat: target.seat, hand_id: target.handId },
+      },
+    }),
+    signal,
+  });
+  const payload: unknown = await response.json();
+  if (!response.ok) {
+    if (isErrorResponse(payload)) throw new AnalysisApiError(payload.error.code, payload.error.message);
+    throw new AnalysisApiError("analysis_request_failed", `Analysis failed with HTTP ${response.status}.`);
+  }
+  if (!isActionForecastResponse(payload)) {
+    throw new AnalysisApiError(
+      "invalid_analysis_response",
+      "Action forecast response did not match the expected contract.",
+    );
+  }
+  return payload;
 }

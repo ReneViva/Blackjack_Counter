@@ -2,6 +2,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
+from app.domain import HandStatus
+
 from .card import ObservedCardSchema
 from .rules import RulesSchema
 
@@ -22,6 +24,7 @@ class PlayerHandSchema(HandSchema):
     parent_hand_id: Annotated[StrictStr, Field(min_length=1)] | None = None
     split_depth: Annotated[StrictInt, Field(ge=0)] = 0
     from_split_aces: StrictBool = False
+    status: HandStatus = HandStatus.ACTIVE
 
 
 class TableStateSchema(BaseModel):

@@ -55,6 +55,7 @@ export type TableStatePayload = Readonly<{
     parent_hand_id: string | null;
     split_depth: number;
     from_split_aces: boolean;
+    status: "active" | "stood" | "bust" | "blackjack" | "surrendered";
     cards: readonly ObservedCardPayload[];
   }>[];
   discarded_cards: readonly ObservedCardPayload[];
@@ -109,6 +110,7 @@ export function toTableStatePayload(
         parent_hand_id: hand.parentHandId,
         split_depth: hand.splitDepth,
         from_split_aces: hand.fromSplitAces,
+        status: "active",
         cards: hand.cards.map(toObservedCardPayload),
       })),
     ),

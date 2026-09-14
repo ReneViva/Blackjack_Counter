@@ -127,6 +127,7 @@ describe("multi-hand session chronology", () => {
         parent_hand_id: "seat-4-hand-1",
         split_depth: 1,
         from_split_aces: false,
+        status: "active",
         cards: [{ kind: "known", rank: "8", suit: "H" }],
       },
       {
@@ -136,6 +137,7 @@ describe("multi-hand session chronology", () => {
         parent_hand_id: "seat-4-hand-1",
         split_depth: 1,
         from_split_aces: false,
+        status: "active",
         cards: [{ kind: "known", rank: "8", suit: "C" }],
       },
     ]);

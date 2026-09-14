@@ -57,7 +57,7 @@ describe("direct-manipulation performance contract", () => {
     expect(requestSignals[0]?.aborted).toBe(true);
 
     await waitFor(() => {
-      expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/analyze"))).toHaveLength(1);
+      expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/analyze"))).toHaveLength(2);
       expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/research/compare"))).toHaveLength(2);
     }, { timeout: 1_500 });
   });

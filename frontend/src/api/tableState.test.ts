@@ -60,6 +60,7 @@ describe("table-state transport contract", () => {
           parent_hand_id: null,
           split_depth: 0,
           from_split_aces: false,
+          status: "active",
           cards: [],
         },
         {
@@ -69,6 +70,7 @@ describe("table-state transport contract", () => {
           parent_hand_id: null,
           split_depth: 0,
           from_split_aces: false,
+          status: "active",
           cards: [{ kind: "known", rank: "A", suit: "S" }],
         },
       ],

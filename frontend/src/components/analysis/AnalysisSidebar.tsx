@@ -2,8 +2,11 @@ import { useEffect, useRef, useState } from "react";
 
 import {
   AnalysisApiError,
+  analyzeActionForecast,
   analyzeExact,
   type AnalysisResponse,
+  type ExactActionForecastResponse,
+  type ExactActionForecastResult,
   type ExactAnalysisResponse,
 } from "../../api/analysis";
 import {
@@ -32,14 +35,41 @@ function exactResult(result: AnalysisResponse | null): ExactAnalysisResponse | n
   return result;
 }
 
+function ForecastOutcomes({
+  forecast,
+  label,
+}: Readonly<{ forecast: ExactActionForecastResult; label: string }>) {
+  return (
+    <article className="forecast-card" aria-label={`${label} forecast`}>
+      <h4>{label}</h4>
+      {forecast.status === "available" && forecast.outcomes ? (
+        <dl className="forecast-probabilities">
+          <div><dt>Win</dt><dd>{percentage(forecast.outcomes.win)}</dd></div>
+          <div><dt>Push</dt><dd>{percentage(forecast.outcomes.push)}</dd></div>
+          <div><dt>Loss</dt><dd>{percentage(forecast.outcomes.loss)}</dd></div>
+        </dl>
+      ) : (
+        <p className="calm-status">
+          {forecast.error?.message ?? "This hypothetical action is unavailable."}
+        </p>
+      )}
+    </article>
+  );
+}
+
 export default function AnalysisSidebar({ activeTarget = null, state }: AnalysisSidebarProps) {
   const [status, setStatus] = useState<RequestStatus>("idle");
+  const [forecastStatus, setForecastStatus] = useState<RequestStatus>("idle");
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
+  const [forecasts, setForecasts] = useState<ExactActionForecastResponse | null>(null);
   const [research, setResearch] = useState<ResearchComparisonResponse | null>(null);
   const [analysisMessage, setAnalysisMessage] = useState("Waiting for an analyzable table state.");
+  const [forecastMessage, setForecastMessage] = useState("Select a primary hand to calculate hypothetical outcomes.");
   const [researchMessage, setResearchMessage] = useState("Add an observation to calculate source-backed scores.");
   const controller = useRef<AbortController | null>(null);
+  const forecastController = useRef<AbortController | null>(null);
   const requestIdentity = useRef(0);
+  const forecastRequestIdentity = useRef(0);
   const sessionStarted = state.events.some((event) => event.type === "NEW_SHOE");
   const table = selectTableState(state);
   const userHands = state.configuration.userSeat === null
@@ -56,6 +86,14 @@ export default function AnalysisSidebar({ activeTarget = null, state }: Analysis
   const analysisHandId = userHandCount > 1 ? selectedUserHand?.handId ?? null : null;
   const canRunExact = state.configuration.rules.decks !== null &&
     userCards.length >= 2 && table.dealerCards.length >= 1;
+  const forecastHand = activeTarget?.kind === "player-hand" &&
+      activeTarget.seat === state.configuration.userSeat
+    ? userHands.find((hand) => hand.handId === activeTarget.handId) ?? null
+    : null;
+  const forecastHandId = forecastHand?.handId ?? null;
+  const canRunForecast = state.configuration.rules.decks !== null &&
+    state.configuration.userSeat !== null && forecastHand !== null &&
+    forecastHand.cards.length >= 2 && table.dealerCards.length >= 1;
 
   useEffect(() => {
     requestIdentity.current += 1;
@@ -147,6 +185,57 @@ export default function AnalysisSidebar({ activeTarget = null, state }: Analysis
     };
   }, [analysisHandId, canRunExact, sessionStarted, state, userHandCount]);
 
+  useEffect(() => {
+    forecastRequestIdentity.current += 1;
+    const identity = forecastRequestIdentity.current;
+    forecastController.current?.abort();
+
+    if (!sessionStarted || !canRunForecast ||
+        state.configuration.userSeat === null || forecastHandId === null) {
+      setForecastStatus(sessionStarted ? "incomplete" : "idle");
+      setForecasts(null);
+      setForecastMessage(
+        forecastHandId === null
+          ? "Select a primary hand to calculate its hypothetical outcomes."
+          : "Waiting for a known deck, two selected-hand cards, and a dealer observation.",
+      );
+      return;
+    }
+
+    setForecastStatus("updating");
+    const timeout = window.setTimeout(() => {
+      const nextController = new AbortController();
+      forecastController.current = nextController;
+      const target = {
+        kind: "player-hand" as const,
+        seat: state.configuration.userSeat!,
+        handId: forecastHandId,
+      };
+      void analyzeActionForecast(state, target, nextController.signal)
+        .then((result) => {
+          if (identity !== forecastRequestIdentity.current || nextController.signal.aborted) return;
+          setForecasts(result);
+          setForecastStatus("current");
+          setForecastMessage("Exact hypothetical outcomes are current for the selected hand.");
+        })
+        .catch((error: unknown) => {
+          if (identity !== forecastRequestIdentity.current || nextController.signal.aborted) return;
+          setForecasts(null);
+          setForecastStatus("unavailable");
+          setForecastMessage(
+            error instanceof AnalysisApiError
+              ? `Hypothetical action forecasts are unavailable: ${error.message}`
+              : "Hypothetical action forecasts are unavailable for the current state.",
+          );
+        });
+    }, 220);
+
+    return () => {
+      window.clearTimeout(timeout);
+      forecastController.current?.abort();
+    };
+  }, [canRunForecast, forecastHandId, sessionStarted, state]);
+
   const exact = exactResult(analysis);
   const scores = Array.isArray(research?.scores) ? research.scores : [];
   const aceInformation = scores
@@ -187,6 +276,39 @@ export default function AnalysisSidebar({ activeTarget = null, state }: Analysis
             <div className="probability probability--loss"><dt>Loss</dt><progress aria-label="Exact loss probability" aria-valuetext={percentage(exact.outcomes.loss)} max={1} value={exact.outcomes.loss} /><dd>{percentage(exact.outcomes.loss)}</dd></div>
           </dl>
         ) : <p className="calm-status">{analysisMessage}</p>}
+      </section>
+
+      <section
+        className="analysis-block action-forecast"
+        aria-labelledby="action-forecast-title"
+        aria-busy={forecastStatus === "updating"}
+      >
+        <div className="analysis-block__title">
+          <div>
+            <span className="analysis-kicker">Hypothetical action forecast</span>
+            <h3 id="action-forecast-title">Selected-hand outcomes</h3>
+          </div>
+          <span className="method-badge">Exact finite-shoe</span>
+        </div>
+        <p className="forecast-explanation">
+          These are modeled outcomes for separate hypothetical actions on the selected hand.
+        </p>
+        {forecastStatus === "updating" ? (
+          <p className="calm-status" role="status">Calculating exact hypothetical outcomes...</p>
+        ) : forecasts ? (
+          <div className="forecast-list">
+            <ForecastOutcomes
+              forecast={forecasts.action_forecasts.stand_now}
+              label="Stand now"
+            />
+            <ForecastOutcomes
+              forecast={forecasts.action_forecasts.hit_once_then_stand}
+              label="Hit once, then stand"
+            />
+          </div>
+        ) : (
+          <p className="calm-status">{forecastMessage}</p>
+        )}
       </section>
 
       <section className="analysis-block research-current" aria-labelledby="research-current-title">

@@ -5,6 +5,7 @@ from app.domain import (
     DealerSoft17,
     GameState,
     Hand,
+    HandStatus,
     ObservedCard,
     Rules,
     UnknownCard,
@@ -29,6 +30,7 @@ class ReconstructedPlayerHand:
     parent_hand_id: str | None = None
     split_depth: int = 0
     from_split_aces: bool = False
+    status: HandStatus = HandStatus.ACTIVE
 
     def __post_init__(self) -> None:
         if self.hand_id is None:
@@ -67,6 +69,7 @@ def build_player(player: PlayerHandSchema) -> ReconstructedPlayerHand:
         parent_hand_id=player.parent_hand_id,
         split_depth=player.split_depth,
         from_split_aces=player.from_split_aces,
+        status=player.status,
     )
 
 

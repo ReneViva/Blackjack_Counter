@@ -1,5 +1,8 @@
 from .analysis import (
+    ExactActionForecast,
+    ExactActionForecastAnalysis,
     ExactTableAnalysis,
+    analyze_exact_action_forecasts,
     analyze_exact_table,
     build_dealer_completion_round,
 )
@@ -7,6 +10,7 @@ from .distribution import OutcomeDistribution, weighted_sum
 from .confidence import WilsonInterval, wilson_interval
 from .comparison import ComparisonEvaluation, OutcomeComparison, compare_table
 from .exact import (
+    ExactDealerEvaluator,
     ExactEvaluation,
     ExactAnalysisError,
     PossibleDraw,
@@ -45,8 +49,11 @@ __all__ = [
     "ConcreteScenario",
     "ComparisonEvaluation",
     "ExactTableAnalysis",
+    "ExactActionForecast",
+    "ExactActionForecastAnalysis",
     "ExactAnalysisError",
     "ExactEvaluation",
+    "ExactDealerEvaluator",
     "HiddenStateBranch",
     "HiddenStateEnumeration",
     "MAX_SIMULATIONS",
@@ -59,6 +66,7 @@ __all__ = [
     "ScenarioPlan",
     "WilsonInterval",
     "analyze_exact_table",
+    "analyze_exact_action_forecasts",
     "build_dealer_completion_round",
     "canonical_hand_key",
     "canonical_round_key",

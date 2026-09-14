@@ -23,6 +23,10 @@ type TablePageProps = Readonly<{
 
 export default function TablePage({ dispatch, state }: TablePageProps) {
   const [activeTarget, setActiveTarget] = useState<TableTarget | null>(null);
+  const [analysisTarget, setAnalysisTarget] = useState<Extract<
+    TableTarget,
+    { kind: "player-hand" }
+  > | null>(null);
   const [legalityResult, setLegalityResult] = useState<Readonly<{
     action: LegalAction;
     handId: string;
@@ -48,6 +52,17 @@ export default function TablePage({ dispatch, state }: TablePageProps) {
       setActiveTarget(null);
     }
   }, [activeTarget, table.playerHands]);
+
+  useEffect(() => {
+    if (analysisTarget && (
+      analysisTarget.seat !== state.configuration.userSeat ||
+      !table.playerHands[analysisTarget.seat].some(
+        (hand) => hand.handId === analysisTarget.handId,
+      )
+    )) {
+      setAnalysisTarget(null);
+    }
+  }, [analysisTarget, state.configuration.userSeat, table.playerHands]);
 
   useEffect(() => {
     if (activeTarget?.kind !== "player-hand") {
@@ -82,7 +97,7 @@ export default function TablePage({ dispatch, state }: TablePageProps) {
   return (
     <div className="table-page">
       <section className="primary-workspace" aria-label="Blackjack probability workspace">
-        <AnalysisSidebar activeTarget={activeTarget} state={state} />
+        <AnalysisSidebar activeTarget={analysisTarget} state={state} />
 
         <section className="table-workspace" aria-label="Blackjack table workspace">
           <BlackjackTable
@@ -90,13 +105,24 @@ export default function TablePage({ dispatch, state }: TablePageProps) {
             activeTarget={activeTarget}
             onAddPlayer={(seat) => {
               dispatch({ type: "ADD_PLAYER", seat });
-              setActiveTarget({
+              const target = {
                 kind: "player-hand",
                 seat,
                 handId: `seat-${seat}-hand-1`,
-              });
+              } as const;
+              setActiveTarget(target);
+              if (state.configuration.userSeat === null &&
+                  state.configuration.activeSeats.length === 0) {
+                setAnalysisTarget(target);
+              }
             }}
-            onSelectTarget={setActiveTarget}
+            onSelectTarget={(target) => {
+              setActiveTarget(target);
+              if (target.kind === "player-hand" &&
+                  target.seat === state.configuration.userSeat) {
+                setAnalysisTarget(target);
+              }
+            }}
             table={table}
             userSeat={state.configuration.userSeat}
           />
@@ -131,10 +157,20 @@ export default function TablePage({ dispatch, state }: TablePageProps) {
                   seat: activeTarget.seat,
                   handId: leftHandId,
                 });
+                if (activeTarget.seat === state.configuration.userSeat) {
+                  setAnalysisTarget({
+                    kind: "player-hand",
+                    seat: activeTarget.seat,
+                    handId: leftHandId,
+                  });
+                }
               }}
               onLeave={() => {
                 dispatch({ type: "LEAVE_PLAYER", seat: activeTarget.seat });
                 setActiveTarget(null);
+                if (analysisTarget?.seat === activeTarget.seat) {
+                  setAnalysisTarget(null);
+                }
               }}
             />
           )}
@@ -175,8 +211,9 @@ export default function TablePage({ dispatch, state }: TablePageProps) {
                 disabled={!sessionStarted}
                 onClick={() => {
                   if (window.confirm("Clear this session and return to an empty table?")) {
-                    dispatch({ type: "RESET" });
-                    setActiveTarget(null);
+                  dispatch({ type: "RESET" });
+                  setActiveTarget(null);
+                  setAnalysisTarget(null);
                   }
                 }}
               >

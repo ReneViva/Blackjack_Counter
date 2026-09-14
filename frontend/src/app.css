@@ -132,6 +132,14 @@ h1, h2, h3 { font-family: Georgia, "Times New Roman", serif; }
 .probability dt { grid-column: 1; grid-row: 1; color: #d6e1db; font-size: .72rem; font-weight: 750; text-transform: uppercase; }
 .probability dd { grid-column: 3; grid-row: 1; margin: 0; font-size: .84rem; font-weight: 850; }
 .calm-status { margin: 0; color: var(--muted); font-size: .73rem; line-height: 1.45; }
+.forecast-explanation { margin: -.15rem 0 .7rem; color: var(--muted); font-size: .67rem; line-height: 1.4; }
+.forecast-list { display: grid; gap: .55rem; }
+.forecast-card { border: 1px solid rgb(136 205 163 / 17%); border-radius: .65rem; padding: .65rem .72rem; background: rgb(255 255 255 / 3%); }
+.forecast-card h4 { margin: 0 0 .48rem; font-family: inherit; font-size: .7rem; letter-spacing: .04em; text-transform: uppercase; }
+.forecast-probabilities { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .35rem; margin: 0; }
+.forecast-probabilities div { min-width: 0; }
+.forecast-probabilities dt { color: var(--muted); font-size: .58rem; text-transform: uppercase; }
+.forecast-probabilities dd { margin: .12rem 0 0; font-size: .78rem; font-weight: 850; }
 .research-score-list { display: grid; gap: .48rem; }
 .research-score-card { border: 1px solid rgb(136 205 163 / 17%); border-radius: .65rem; padding: .68rem .75rem; background: rgb(255 255 255 / 3%); }
 .research-score-card > div { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }

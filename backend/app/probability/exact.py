@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from app.domain import ALL_CARDS, Card, Rank, RoundPhase, RoundState, Shoe
@@ -47,6 +47,79 @@ class PossibleDraw:
 class ExactEvaluation:
     outcomes: OutcomeDistribution
     metrics: CacheMetrics
+
+
+class ExactDealerEvaluator:
+    """Memoized exact dealer-completion evaluator reusable across root branches."""
+
+    def __init__(self, *, max_states: int = 2_000_000) -> None:
+        if (
+            isinstance(max_states, bool)
+            or not isinstance(max_states, int)
+            or max_states < 1
+        ):
+            raise ValueError("max_states must be a positive integer")
+        self._max_states = max_states
+        self._cache: dict[CanonicalKey, OutcomeDistribution] = {}
+        self._cache_hits = 0
+        self._cache_misses = 0
+
+    @property
+    def metrics(self) -> CacheMetrics:
+        return CacheMetrics(
+            states_evaluated=self._cache_misses,
+            cache_hits=self._cache_hits,
+            cache_misses=self._cache_misses,
+        )
+
+    def evaluate(
+        self, state: RoundState, target_hand_index: int = 0
+    ) -> OutcomeDistribution:
+        _require_known_state(state, target_hand_index)
+
+        def evaluate_current(current: RoundState) -> OutcomeDistribution:
+            key = canonical_round_key(current, target_hand_index)
+            cached = self._cache.get(key)
+            if cached is not None:
+                self._cache_hits += 1
+                return cached
+            if self._cache_misses >= self._max_states:
+                raise ExactAnalysisError(
+                    "exact_computation_limit",
+                    "Exact analysis exceeded the configured state limit.",
+                )
+            self._cache_misses += 1
+            result = _evaluate_state(
+                current,
+                target_hand_index,
+                evaluate_current,
+            )
+            self._cache[key] = result
+            return result
+
+        result = evaluate_current(state)
+        if abs(result.total - 1.0) > 1e-10:
+            raise ExactAnalysisError(
+                "probability_mass_invalid",
+                "Exact outcome probability mass does not sum to one.",
+            )
+        return result
+
+    def evaluate_weighted(
+        self,
+        branches: Iterable[tuple[float, RoundState]],
+        target_hand_index: int = 0,
+    ) -> OutcomeDistribution:
+        result = weighted_sum(
+            (weight, self.evaluate(state, target_hand_index))
+            for weight, state in branches
+        )
+        if abs(result.total - 1.0) > 1e-10:
+            raise ExactAnalysisError(
+                "probability_mass_invalid",
+                "Exact outcome probability mass does not sum to one.",
+            )
+        return result
 
 
 def _require_known_state(state: RoundState, target_hand_index: int) -> None:
@@ -182,46 +255,9 @@ def evaluate_exact(
     max_states: int = 2_000_000,
 ) -> ExactEvaluation:
     """Enumerate exact outcomes with an isolated per-analysis cache."""
-    _require_known_state(state, target_hand_index)
-    if (
-        isinstance(max_states, bool)
-        or not isinstance(max_states, int)
-        or max_states < 1
-    ):
-        raise ValueError("max_states must be a positive integer")
-
-    cache: dict[CanonicalKey, OutcomeDistribution] = {}
-    cache_hits = 0
-    cache_misses = 0
-
-    def evaluate(current: RoundState) -> OutcomeDistribution:
-        nonlocal cache_hits, cache_misses
-        key = canonical_round_key(current, target_hand_index)
-        cached = cache.get(key)
-        if cached is not None:
-            cache_hits += 1
-            return cached
-        if cache_misses >= max_states:
-            raise ExactAnalysisError(
-                "exact_computation_limit",
-                "Exact analysis exceeded the configured state limit.",
-            )
-        cache_misses += 1
-        result = _evaluate_state(current, target_hand_index, evaluate)
-        cache[key] = result
-        return result
-
-    outcomes = evaluate(state)
-    if abs(outcomes.total - 1.0) > 1e-10:
-        raise ExactAnalysisError(
-            "probability_mass_invalid",
-            "Exact outcome probability mass does not sum to one.",
-        )
+    evaluator = ExactDealerEvaluator(max_states=max_states)
+    outcomes = evaluator.evaluate(state, target_hand_index)
     return ExactEvaluation(
         outcomes=outcomes,
-        metrics=CacheMetrics(
-            states_evaluated=cache_misses,
-            cache_hits=cache_hits,
-            cache_misses=cache_misses,
-        ),
+        metrics=evaluator.metrics,
     )
