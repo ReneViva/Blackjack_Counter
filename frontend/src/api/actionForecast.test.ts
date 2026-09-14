@@ -27,6 +27,9 @@ describe("exact action forecast API", () => {
         action_forecasts: {
           stand_now: { contract: "stand_now", status: "unavailable", method: "exact", outcomes: null, metadata: null, error: { code: "terminal_hand", message: "Unavailable.", field: null } },
           hit_once_then_stand: { contract: "hit_once_then_stand", status: "unavailable", method: "exact", outcomes: null, metadata: null, error: { code: "terminal_hand", message: "Unavailable.", field: null } },
+          double_one_card_then_stand: { contract: "double_one_card_then_stand", status: "unavailable", method: "exact", outcomes: null, metadata: null, error: { code: "terminal_hand", message: "Unavailable.", field: null } },
+          surrender_now: { contract: "surrender_now", status: "unavailable", method: "exact", terminal: null, error: { code: "terminal_hand", message: "Unavailable.", field: null } },
+          split_one_card_each_then_stand: { contract: "split_one_card_each_then_stand", status: "unavailable", method: "exact", child_hand_1: null, child_hand_2: null, metadata: null, error: { code: "terminal_hand", message: "Unavailable.", field: null } },
         },
       }),
     } as Response);

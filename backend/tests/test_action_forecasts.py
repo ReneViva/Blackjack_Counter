@@ -15,6 +15,7 @@ from app.domain import (
     Rank,
     Rules,
     Shoe,
+    SurrenderRule,
     Suit,
     UnknownCard,
 )
@@ -372,6 +373,9 @@ def test_api_returns_both_exact_contracts_without_ranking_or_ci_fields() -> None
     assert set(payload["action_forecasts"]) == {
         "stand_now",
         "hit_once_then_stand",
+        "double_one_card_then_stand",
+        "surrender_now",
+        "split_one_card_each_then_stand",
     }
     assert payload["action_forecasts"]["stand_now"]["contract"] == "stand_now"
     assert payload["action_forecasts"]["hit_once_then_stand"]["contract"] == "hit_once_then_stand"
@@ -385,6 +389,9 @@ def test_api_returns_both_exact_contracts_without_ranking_or_ci_fields() -> None
         "runner_up_action",
         "ci_low",
         "ci_high",
+        "payout",
+        "wager",
+        "expected_value",
     ):
         assert forbidden not in serialized
 
@@ -476,3 +483,333 @@ def test_unknown_deck_forecasts_remain_separate_unaggregated_scenarios() -> None
         scenario["result"]["method"] == "exact_action_forecast"
         for scenario in payload["scenarios"]
     )
+
+
+def test_legal_double_draws_one_card_then_stands_without_a_multiplier() -> None:
+    state = table_state(
+        player_cards=(card(Rank.TEN, Suit.HEARTS), card(Rank.TWO, Suit.HEARTS)),
+        dealer_cards=(card(Rank.TEN, Suit.DIAMONDS), card(Rank.SEVEN, Suit.DIAMONDS)),
+        shoe=sparse_shoe(**{"5": 1, "K": 3}),
+    )
+
+    result = forecast(state)
+
+    assert result.double_one_card_then_stand.status == "available"
+    assert result.double_one_card_then_stand.outcomes == result.hit_once_then_stand.outcomes
+    assert_probability_mass(result.double_one_card_then_stand)
+
+
+def test_double_immediate_bust_and_guaranteed_non_bust_are_exact() -> None:
+    bust = table_state(
+        player_cards=(card(Rank.TEN, Suit.HEARTS), card(Rank.QUEEN, Suit.HEARTS)),
+        dealer_cards=(card(Rank.TEN, Suit.DIAMONDS), card(Rank.SEVEN, Suit.DIAMONDS)),
+        shoe=sparse_shoe(K=1),
+    )
+    non_bust = table_state(
+        player_cards=(card(Rank.TEN, Suit.HEARTS), card(Rank.EIGHT, Suit.HEARTS)),
+        dealer_cards=(card(Rank.TEN, Suit.DIAMONDS), card(Rank.SEVEN, Suit.DIAMONDS)),
+        shoe=sparse_shoe(**{"2": 1}),
+    )
+
+    bust_result = forecast(bust).double_one_card_then_stand
+    non_bust_result = forecast(non_bust).double_one_card_then_stand
+
+    assert bust_result.outcomes is not None and bust_result.outcomes.loss == 1.0
+    assert non_bust_result.outcomes is not None and non_bust_result.outcomes.win == 1.0
+
+
+def test_double_after_split_rule_is_authoritative() -> None:
+    selected = ReconstructedPlayerHand(
+        seat=4,
+        is_user=True,
+        hand=Hand(cards=(card(Rank.TEN, Suit.HEARTS), card(Rank.TWO, Suit.HEARTS))),
+        hand_id="seat-4-hand-1-1",
+        parent_hand_id="seat-4-hand-1",
+        split_depth=1,
+    )
+    rules = Rules(
+        decks=1,
+        dealer_soft_17=DealerSoft17.STAND,
+        double_after_split=False,
+    )
+    state = table_state(
+        player_cards=selected.hand.cards,
+        dealer_cards=(card(Rank.TEN, Suit.DIAMONDS), card(Rank.SEVEN, Suit.DIAMONDS)),
+        shoe=sparse_shoe(**{"5": 1}),
+        player=selected,
+        rules=rules,
+    )
+
+    result = forecast(state)
+
+    assert result.hit_once_then_stand.status == "available"
+    assert result.double_one_card_then_stand.status == "unavailable"
+    assert result.double_one_card_then_stand.code == "double_not_allowed"
+
+
+def test_double_is_illegal_on_a_locked_split_ace_hand() -> None:
+    selected = ReconstructedPlayerHand(
+        seat=4,
+        is_user=True,
+        hand=Hand(cards=(card(Rank.ACE, Suit.HEARTS), card(Rank.FIVE, Suit.CLUBS))),
+        hand_id="seat-4-hand-1-1",
+        parent_hand_id="seat-4-hand-1",
+        split_depth=1,
+        from_split_aces=True,
+    )
+    rules = Rules(
+        decks=1,
+        dealer_soft_17=DealerSoft17.STAND,
+        hit_split_aces=False,
+    )
+    state = table_state(
+        player_cards=selected.hand.cards,
+        dealer_cards=(card(Rank.TEN, Suit.DIAMONDS), card(Rank.SEVEN, Suit.DIAMONDS)),
+        shoe=sparse_shoe(**{"2": 1}),
+        player=selected,
+        rules=rules,
+    )
+
+    result = forecast(state).double_one_card_then_stand
+
+    assert result.status == "unavailable"
+    assert result.code == "action_not_allowed"
+
+
+def test_late_surrender_is_terminal_without_outcome_distribution() -> None:
+    rules = Rules(
+        decks=1,
+        dealer_soft_17=DealerSoft17.STAND,
+        surrender=SurrenderRule.LATE,
+    )
+    state = table_state(
+        player_cards=(card(Rank.TEN, Suit.HEARTS), card(Rank.SIX, Suit.HEARTS)),
+        dealer_cards=(card(Rank.TEN, Suit.DIAMONDS), card(Rank.SEVEN, Suit.DIAMONDS)),
+        shoe=sparse_shoe(**{"2": 1, "3": 1}),
+        rules=rules,
+    )
+
+    before = state
+    result = forecast(state).surrender_now
+
+    assert state == before
+    assert result.status == "available"
+    assert result.terminal == "surrendered"
+
+
+def test_surrender_disabled_is_structured_unavailable() -> None:
+    state = table_state(
+        player_cards=(card(Rank.TEN, Suit.HEARTS), card(Rank.SIX, Suit.HEARTS)),
+        dealer_cards=(card(Rank.TEN, Suit.DIAMONDS), card(Rank.SEVEN, Suit.DIAMONDS)),
+        shoe=sparse_shoe(**{"2": 1, "3": 1}),
+    )
+
+    result = forecast(state).surrender_now
+
+    assert result.status == "unavailable"
+    assert result.terminal is None
+    assert result.code == "surrender_not_allowed"
+
+
+def test_split_two_card_shoe_deals_child_one_then_child_two_without_replacement() -> None:
+    state = table_state(
+        player_cards=(card(Rank.EIGHT, Suit.HEARTS), card(Rank.EIGHT, Suit.CLUBS)),
+        dealer_cards=(card(Rank.TEN, Suit.DIAMONDS), card(Rank.SEVEN, Suit.DIAMONDS)),
+        shoe=sparse_shoe(**{"2": 1, "K": 1}),
+    )
+
+    before = state
+    first = forecast(state).split_one_card_each_then_stand
+    second = forecast(state).split_one_card_each_then_stand
+
+    assert state == before
+    assert first == second
+    assert first.status == "available"
+    assert first.child_hand_1 is not None
+    assert first.child_hand_2 is not None
+    assert first.child_hand_1.win == 0.5
+    assert first.child_hand_1.push == 0.0
+    assert first.child_hand_1.loss == 0.5
+    assert first.child_hand_2 == first.child_hand_1
+    assert math.isclose(first.child_hand_1.total, 1.0, abs_tol=1e-12)
+    assert math.isclose(first.child_hand_2.total, 1.0, abs_tol=1e-12)
+
+
+def test_split_forecast_accounts_for_other_hands_and_departed_cards() -> None:
+    reduced_request = api_payload()
+    reduced_request["state"]["players"][0]["cards"] = [  # type: ignore[index]
+        known("8", "H"),
+        known("8", "S"),
+    ]
+    larger_request = api_payload()
+    larger_request["state"]["players"] = [  # type: ignore[index]
+        larger_request["state"]["players"][0]  # type: ignore[index]
+    ]
+    larger_request["state"]["players"][0]["cards"] = [  # type: ignore[index]
+        known("8", "H"),
+        known("8", "S"),
+    ]
+    larger_request["state"]["discarded_cards"] = []  # type: ignore[index]
+
+    reduced = client.post("/api/analyze", json=reduced_request).json()[
+        "action_forecasts"
+    ]["split_one_card_each_then_stand"]
+    larger = client.post("/api/analyze", json=larger_request).json()[
+        "action_forecasts"
+    ]["split_one_card_each_then_stand"]
+
+    assert reduced["status"] == "available"
+    assert larger["status"] == "available"
+    assert reduced["child_hand_1"] != larger["child_hand_1"]
+    assert reduced["child_hand_2"] != larger["child_hand_2"]
+    assert math.isclose(sum(reduced["child_hand_1"].values()), 1.0, abs_tol=1e-12)
+    assert math.isclose(sum(reduced["child_hand_2"].values()), 1.0, abs_tol=1e-12)
+
+
+def test_split_legality_respects_disabled_and_max_hand_rules() -> None:
+    selected = ReconstructedPlayerHand(
+        seat=4,
+        is_user=True,
+        hand=Hand(cards=(card(Rank.EIGHT, Suit.HEARTS), card(Rank.EIGHT, Suit.CLUBS))),
+        hand_id="seat-4-hand-1-1",
+        parent_hand_id="seat-4-hand-1",
+        split_depth=1,
+    )
+    sibling = ReconstructedPlayerHand(
+        seat=4,
+        is_user=False,
+        hand=Hand(cards=(card(Rank.FIVE, Suit.HEARTS),)),
+        hand_id="seat-4-hand-1-2",
+        parent_hand_id="seat-4-hand-1",
+        split_depth=1,
+    )
+    disabled_rules = Rules(
+        decks=1,
+        dealer_soft_17=DealerSoft17.STAND,
+        splitting_enabled=False,
+    )
+    maxed_rules = Rules(
+        decks=1,
+        dealer_soft_17=DealerSoft17.STAND,
+        max_split_hands=2,
+    )
+    common = dict(
+        player_cards=selected.hand.cards,
+        dealer_cards=(card(Rank.TEN, Suit.DIAMONDS), card(Rank.SEVEN, Suit.DIAMONDS)),
+        shoe=sparse_shoe(**{"2": 1, "K": 1}),
+        player=selected,
+    )
+
+    disabled = forecast(table_state(**common, rules=disabled_rules))
+    maxed = forecast(table_state(**common, rules=maxed_rules, others=(sibling,)))
+
+    assert disabled.split_one_card_each_then_stand.code == "splitting_disabled"
+    assert maxed.split_one_card_each_then_stand.code == "split_limit_reached"
+
+
+def test_resplit_aces_rule_and_fixed_split_ace_continuation_are_respected() -> None:
+    rules = Rules(
+        decks=1,
+        dealer_soft_17=DealerSoft17.STAND,
+        resplit_aces=False,
+        hit_split_aces=False,
+    )
+    resplit = ReconstructedPlayerHand(
+        seat=4,
+        is_user=True,
+        hand=Hand(cards=(card(Rank.ACE, Suit.HEARTS), card(Rank.ACE, Suit.CLUBS))),
+        hand_id="seat-4-hand-1-1",
+        parent_hand_id="seat-4-hand-1",
+        split_depth=1,
+        from_split_aces=True,
+    )
+    common = dict(
+        player_cards=resplit.hand.cards,
+        dealer_cards=(card(Rank.TEN, Suit.DIAMONDS), card(Rank.SEVEN, Suit.DIAMONDS)),
+        shoe=sparse_shoe(**{"2": 1, "K": 1}),
+        rules=rules,
+    )
+    resplit_state = table_state(**common, player=resplit)
+    initial_state = table_state(**common)
+
+    blocked = forecast(resplit_state).split_one_card_each_then_stand
+    initial = forecast(initial_state).split_one_card_each_then_stand
+
+    assert blocked.status == "unavailable"
+    assert blocked.code == "resplit_aces_not_allowed"
+    assert initial.status == "available"
+    assert initial.child_hand_1 is not None and initial.child_hand_1.total == 1.0
+    assert initial.child_hand_2 is not None and initial.child_hand_2.total == 1.0
+
+
+def test_split_preserves_hidden_peek_conditioning() -> None:
+    rules = Rules(
+        decks=1,
+        dealer_soft_17=DealerSoft17.STAND,
+        dealer_second_card=DealerSecondCardRule.HOLE_CARD,
+        dealer_blackjack_check=DealerBlackjackCheckRule.PEEK,
+    )
+    state = table_state(
+        player_cards=(card(Rank.EIGHT, Suit.HEARTS), card(Rank.EIGHT, Suit.CLUBS)),
+        dealer_cards=(card(Rank.ACE, Suit.DIAMONDS), UnknownCard()),
+        shoe=replace(
+            sparse_shoe(K=1, **{"2": 1, "3": 1, "4": 1, "5": 1, "9": 1}),
+            unknown_removed_count=1,
+        ),
+        rules=rules,
+    )
+
+    result = analyze_exact_action_forecasts(
+        state,
+        target_seat=4,
+        target_hand_id="seat-4-hand-1",
+        dealer_check_result=DealerCheckResult.NO_BLACKJACK,
+    ).split_one_card_each_then_stand
+
+    assert result.status == "available"
+    assert result.hidden_states_evaluated > 0
+    assert result.hidden_weight_mass == 1.0
+    assert result.child_hand_1 is not None
+    assert result.child_hand_2 is not None
+    assert math.isclose(result.child_hand_1.total, 1.0, abs_tol=1e-12)
+    assert math.isclose(result.child_hand_2.total, 1.0, abs_tol=1e-12)
+
+
+def test_split_resource_limit_is_structured_unavailable() -> None:
+    state = table_state(
+        player_cards=(card(Rank.EIGHT, Suit.HEARTS), card(Rank.EIGHT, Suit.CLUBS)),
+        dealer_cards=(card(Rank.TEN, Suit.DIAMONDS), card(Rank.SEVEN, Suit.DIAMONDS)),
+        shoe=sparse_shoe(**{"2": 1, "K": 1}),
+    )
+
+    result = analyze_exact_action_forecasts(
+        state,
+        target_seat=4,
+        target_hand_id="seat-4-hand-1",
+        max_states=1,
+    ).split_one_card_each_then_stand
+
+    assert result.status == "unavailable"
+    assert result.code == "exact_computation_limit"
+
+
+def test_extended_api_shapes_are_independent_and_non_monetary() -> None:
+    request = api_payload()
+    request["state"]["rules"]["surrender"] = "late"  # type: ignore[index]
+    response = client.post("/api/analyze", json=request)
+
+    assert response.status_code == 200
+    actions = response.json()["action_forecasts"]
+    assert actions["double_one_card_then_stand"]["status"] == "available"
+    assert actions["double_one_card_then_stand"]["outcomes"] == actions["hit_once_then_stand"]["outcomes"]
+    assert actions["surrender_now"] == {
+        "contract": "surrender_now",
+        "status": "available",
+        "method": "exact",
+        "terminal": "surrendered",
+        "error": None,
+    }
+    assert actions["split_one_card_each_then_stand"]["status"] == "unavailable"
+    serialized = response.text.lower()
+    for forbidden in ("payout", "wager", "stake", "expected_value", "recommended", "best_action"):
+        assert forbidden not in serialized

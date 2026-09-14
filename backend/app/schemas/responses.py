@@ -74,10 +74,38 @@ class ActionForecastTargetResponse(BaseModel):
 class ExactActionForecastResultResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    contract: Literal["stand_now", "hit_once_then_stand"]
+    contract: Literal[
+        "stand_now",
+        "hit_once_then_stand",
+        "double_one_card_then_stand",
+    ]
     status: Literal["available", "unavailable"]
     method: Literal["exact"] = "exact"
     outcomes: OutcomeProbabilities | None = None
+    metadata: AnalysisMetadata | None = None
+    error: APIErrorDetail | None = None
+
+
+class ExactTerminalActionForecastResultResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract: Literal["surrender_now"] = "surrender_now"
+    status: Literal["available", "unavailable"]
+    method: Literal["exact"] = "exact"
+    terminal: Literal["surrendered"] | None = None
+    error: APIErrorDetail | None = None
+
+
+class ExactSplitActionForecastResultResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract: Literal["split_one_card_each_then_stand"] = (
+        "split_one_card_each_then_stand"
+    )
+    status: Literal["available", "unavailable"]
+    method: Literal["exact"] = "exact"
+    child_hand_1: OutcomeProbabilities | None = None
+    child_hand_2: OutcomeProbabilities | None = None
     metadata: AnalysisMetadata | None = None
     error: APIErrorDetail | None = None
 
@@ -87,6 +115,9 @@ class ExactActionForecastsResponse(BaseModel):
 
     stand_now: ExactActionForecastResultResponse
     hit_once_then_stand: ExactActionForecastResultResponse
+    double_one_card_then_stand: ExactActionForecastResultResponse
+    surrender_now: ExactTerminalActionForecastResultResponse
+    split_one_card_each_then_stand: ExactSplitActionForecastResultResponse
 
 
 class ExactActionForecastResponse(BaseModel):

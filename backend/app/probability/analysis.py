@@ -1,6 +1,6 @@
 from dataclasses import dataclass, replace
 import math
-from typing import Literal
+from typing import Literal, TypeAlias
 
 from app.domain import (
     DealerCheckResult,
@@ -20,9 +20,14 @@ from app.engine import (
     ReconstructedTableState,
     evaluate_dealer,
     evaluate_hand,
+    observe_split_replacement,
     player_action_decision,
+    player_double,
     player_hit,
+    player_split,
     player_stand,
+    player_surrender,
+    split_action_decision,
     validate_table_state,
 )
 
@@ -35,6 +40,13 @@ from .exact import (
 )
 from .hidden_cards import enumerate_hidden_states
 from .memoization import CacheMetrics
+
+
+OutcomeForecastContract: TypeAlias = Literal[
+    "stand_now",
+    "hit_once_then_stand",
+    "double_one_card_then_stand",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,9 +62,31 @@ class ExactTableAnalysis:
 
 @dataclass(frozen=True, slots=True)
 class ExactActionForecast:
-    contract: Literal["stand_now", "hit_once_then_stand"]
+    contract: OutcomeForecastContract
     status: Literal["available", "unavailable"]
     outcomes: OutcomeDistribution | None = None
+    metrics: CacheMetrics | None = None
+    code: str | None = None
+    message: str | None = None
+    hidden_states_evaluated: int = 0
+    hidden_weight_mass: float = 1.0
+
+
+@dataclass(frozen=True, slots=True)
+class ExactTerminalActionForecast:
+    contract: Literal["surrender_now"]
+    status: Literal["available", "unavailable"]
+    terminal: Literal["surrendered"] | None = None
+    code: str | None = None
+    message: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ExactSplitActionForecast:
+    contract: Literal["split_one_card_each_then_stand"]
+    status: Literal["available", "unavailable"]
+    child_hand_1: OutcomeDistribution | None = None
+    child_hand_2: OutcomeDistribution | None = None
     metrics: CacheMetrics | None = None
     code: str | None = None
     message: str | None = None
@@ -66,6 +100,9 @@ class ExactActionForecastAnalysis:
     target_hand_id: str | None
     stand_now: ExactActionForecast
     hit_once_then_stand: ExactActionForecast
+    double_one_card_then_stand: ExactActionForecast
+    surrender_now: ExactTerminalActionForecast
+    split_one_card_each_then_stand: ExactSplitActionForecast
 
 
 def build_dealer_completion_round(
@@ -203,12 +240,36 @@ def analyze_exact_table(
 
 
 def _unavailable_forecast(
-    contract: Literal["stand_now", "hit_once_then_stand"],
+    contract: OutcomeForecastContract,
     code: str,
     message: str,
 ) -> ExactActionForecast:
     return ExactActionForecast(
         contract=contract,
+        status="unavailable",
+        code=code,
+        message=message,
+    )
+
+
+def _unavailable_terminal_forecast(
+    code: str,
+    message: str,
+) -> ExactTerminalActionForecast:
+    return ExactTerminalActionForecast(
+        contract="surrender_now",
+        status="unavailable",
+        code=code,
+        message=message,
+    )
+
+
+def _unavailable_split_forecast(
+    code: str,
+    message: str,
+) -> ExactSplitActionForecast:
+    return ExactSplitActionForecast(
+        contract="split_one_card_each_then_stand",
         status="unavailable",
         code=code,
         message=message,
@@ -227,6 +288,13 @@ def _unavailable_analysis(
         stand_now=_unavailable_forecast("stand_now", code, message),
         hit_once_then_stand=_unavailable_forecast(
             "hit_once_then_stand", code, message
+        ),
+        double_one_card_then_stand=_unavailable_forecast(
+            "double_one_card_then_stand", code, message
+        ),
+        surrender_now=_unavailable_terminal_forecast(code, message),
+        split_one_card_each_then_stand=_unavailable_split_forecast(
+            code, message
         ),
     )
 
@@ -299,26 +367,35 @@ def _action_round(
     )
 
 
-def _decision_unavailable(
-    contract: Literal["stand_now", "hit_once_then_stand"],
+def _decision_rejection(
     decisions: tuple[ActionDecision, ...],
-) -> ExactActionForecast | None:
+) -> tuple[str, str] | None:
     rejected = tuple(decision for decision in decisions if not decision.allowed)
     if not rejected:
         return None
     codes = {decision.code for decision in rejected}
     messages = {decision.message for decision in rejected}
     if len(rejected) != len(decisions) or len(codes) > 1 or len(messages) > 1:
-        return _unavailable_forecast(
-            contract,
+        return (
             "ambiguous_hand_status",
             "Latent card assignments do not agree on whether this action is legal.",
         )
     decision = rejected[0]
-    return _unavailable_forecast(
-        contract,
+    return (
         decision.code or "action_not_allowed",
         decision.message or "The hypothetical action is not allowed.",
+    )
+
+
+def _decision_unavailable(
+    contract: OutcomeForecastContract,
+    decisions: tuple[ActionDecision, ...],
+) -> ExactActionForecast | None:
+    rejection = _decision_rejection(decisions)
+    return (
+        None
+        if rejection is None
+        else _unavailable_forecast(contract, *rejection)
     )
 
 
@@ -330,6 +407,167 @@ def _metrics_delta(before: CacheMetrics, after: CacheMetrics) -> CacheMetrics:
     )
 
 
+def _one_card_then_stand_forecast(
+    contract: Literal[
+        "hit_once_then_stand", "double_one_card_then_stand"
+    ],
+    action: Literal[PlayerAction.HIT, PlayerAction.DOUBLE],
+    rounds: tuple[tuple[float, RoundState], ...],
+    evaluator: ExactDealerEvaluator,
+    *,
+    hidden_states_evaluated: int,
+    hidden_weight_mass: float,
+) -> ExactActionForecast:
+    decisions = tuple(
+        player_action_decision(round_state, action)
+        for _, round_state in rounds
+    )
+    unavailable = _decision_unavailable(contract, decisions)
+    if unavailable is not None:
+        return unavailable
+
+    roots: list[tuple[float, RoundState]] = []
+    for hidden_weight, round_state in rounds:
+        draws = possible_draws(round_state.game_state.shoe)
+        if not draws:
+            return _unavailable_forecast(
+                contract,
+                "exact_shoe_exhausted",
+                "The exact shoe has no card available for this hypothetical action.",
+            )
+        for draw in draws:
+            after_draw = (
+                player_hit(round_state, draw.card)
+                if action is PlayerAction.HIT
+                else player_double(round_state, draw.card)
+            )
+            if (
+                action is PlayerAction.HIT
+                and after_draw.phase is RoundPhase.PLAYER_TURNS
+            ):
+                after_draw = player_stand(after_draw)
+            roots.append((hidden_weight * draw.probability, after_draw))
+
+    before = evaluator.metrics
+    try:
+        outcomes = evaluator.evaluate_weighted(roots)
+    except ExactAnalysisError as error:
+        return _unavailable_forecast(contract, error.code, error.message)
+    return ExactActionForecast(
+        contract=contract,
+        status="available",
+        outcomes=outcomes,
+        metrics=_metrics_delta(before, evaluator.metrics),
+        hidden_states_evaluated=hidden_states_evaluated,
+        hidden_weight_mass=hidden_weight_mass,
+    )
+
+
+def _force_split_children_to_stand(state: RoundState) -> RoundState:
+    """Apply the fixed Phase 3 continuation after both replacement cards."""
+    hands = tuple(
+        replace(
+            hand,
+            status=HandStatus.STOOD,
+            decision_count=hand.decision_count + 1,
+        )
+        if hand.status is HandStatus.ACTIVE
+        else hand
+        for hand in state.player_hands
+    )
+    all_lost = all(
+        hand.status in (HandStatus.BUST, HandStatus.SURRENDERED)
+        for hand in hands
+    )
+    return replace(
+        state,
+        player_hands=hands,
+        phase=(RoundPhase.ROUND_COMPLETE if all_lost else RoundPhase.DEALER_TURN),
+        active_hand_index=None,
+    )
+
+
+def _split_forecast(
+    source_state: ReconstructedTableState,
+    selected: ReconstructedPlayerHand,
+    rounds: tuple[tuple[float, RoundState], ...],
+    evaluator: ExactDealerEvaluator,
+    *,
+    hidden_states_evaluated: int,
+    hidden_weight_mass: float,
+) -> ExactSplitActionForecast:
+    seat_hand_count = sum(
+        player.seat == selected.seat for player in source_state.players
+    )
+    decisions: list[ActionDecision] = []
+    for _, round_state in rounds:
+        decision = player_action_decision(round_state, PlayerAction.SPLIT)
+        if decision.allowed:
+            decision = split_action_decision(
+                round_state.game_state.rules,
+                round_state.player_hands[0],
+                seat_hand_count,
+            )
+        decisions.append(decision)
+    rejection = _decision_rejection(tuple(decisions))
+    if rejection is not None:
+        return _unavailable_split_forecast(*rejection)
+
+    roots: list[tuple[float, RoundState]] = []
+    for hidden_weight, round_state in rounds:
+        split_state = player_split(round_state)
+        child_1_id = split_state.player_hands[0].hand_id
+        child_2_id = split_state.player_hands[1].hand_id
+        assert child_1_id is not None and child_2_id is not None
+        first_draws = possible_draws(split_state.game_state.shoe)
+        if not first_draws:
+            return _unavailable_split_forecast(
+                "exact_shoe_exhausted",
+                "The exact shoe does not contain two split replacement cards.",
+            )
+        for first_draw in first_draws:
+            after_first = observe_split_replacement(
+                split_state, child_1_id, first_draw.card
+            )
+            second_draws = possible_draws(after_first.game_state.shoe)
+            if not second_draws:
+                return _unavailable_split_forecast(
+                    "exact_shoe_exhausted",
+                    "The exact shoe does not contain two split replacement cards.",
+                )
+            for second_draw in second_draws:
+                after_second = observe_split_replacement(
+                    after_first, child_2_id, second_draw.card
+                )
+                finalized = _force_split_children_to_stand(after_second)
+                roots.append(
+                    (
+                        hidden_weight
+                        * first_draw.probability
+                        * second_draw.probability,
+                        finalized,
+                    )
+                )
+
+    before = evaluator.metrics
+    try:
+        child_hand_1, child_hand_2 = evaluator.evaluate_weighted_many(
+            roots,
+            target_hand_indices=(0, 1),
+        )
+    except ExactAnalysisError as error:
+        return _unavailable_split_forecast(error.code, error.message)
+    return ExactSplitActionForecast(
+        contract="split_one_card_each_then_stand",
+        status="available",
+        child_hand_1=child_hand_1,
+        child_hand_2=child_hand_2,
+        metrics=_metrics_delta(before, evaluator.metrics),
+        hidden_states_evaluated=hidden_states_evaluated,
+        hidden_weight_mass=hidden_weight_mass,
+    )
+
+
 def analyze_exact_action_forecasts(
     state: ReconstructedTableState,
     *,
@@ -338,7 +576,7 @@ def analyze_exact_action_forecasts(
     dealer_check_result: DealerCheckResult = DealerCheckResult.NOT_REQUIRED,
     max_states: int = 2_000_000,
 ) -> ExactActionForecastAnalysis:
-    """Compare stand-now with exactly one hit followed immediately by stand."""
+    """Evaluate fixed, non-ranked action continuations for one selected hand."""
     validation = validate_table_state(state)
     if not validation.valid:
         issue = validation.errors[0]
@@ -476,51 +714,61 @@ def analyze_exact_action_forecasts(
                 hidden_weight_mass=hidden_mass,
             )
 
-    hit_decisions = tuple(
-        player_action_decision(round_state, PlayerAction.HIT)
-        for _, round_state in rounds
+    hit = _one_card_then_stand_forecast(
+        "hit_once_then_stand",
+        PlayerAction.HIT,
+        rounds,
+        evaluator,
+        hidden_states_evaluated=hidden.states_evaluated,
+        hidden_weight_mass=hidden_mass,
     )
-    hit = _decision_unavailable("hit_once_then_stand", hit_decisions)
-    if hit is None:
-        hit_roots: list[tuple[float, RoundState]] = []
-        for hidden_weight, round_state in rounds:
-            draws = possible_draws(round_state.game_state.shoe)
-            if not draws:
-                hit = _unavailable_forecast(
-                    "hit_once_then_stand",
-                    "exact_shoe_exhausted",
-                    "The exact shoe has no card available for the hypothetical hit.",
-                )
-                break
-            for draw in draws:
-                after_hit = player_hit(round_state, draw.card)
-                if after_hit.phase is RoundPhase.PLAYER_TURNS:
-                    after_hit = player_stand(after_hit)
-                hit_roots.append(
-                    (hidden_weight * draw.probability, after_hit)
-                )
-        if hit is None:
-            before = evaluator.metrics
-            try:
-                outcomes = evaluator.evaluate_weighted(hit_roots)
-            except ExactAnalysisError as error:
-                hit = _unavailable_forecast(
-                    "hit_once_then_stand", error.code, error.message
-                )
-            else:
-                hit = ExactActionForecast(
-                    contract="hit_once_then_stand",
-                    status="available",
-                    outcomes=outcomes,
-                    metrics=_metrics_delta(before, evaluator.metrics),
-                    hidden_states_evaluated=hidden.states_evaluated,
-                    hidden_weight_mass=hidden_mass,
-                )
+    double = _one_card_then_stand_forecast(
+        "double_one_card_then_stand",
+        PlayerAction.DOUBLE,
+        rounds,
+        evaluator,
+        hidden_states_evaluated=hidden.states_evaluated,
+        hidden_weight_mass=hidden_mass,
+    )
 
-    assert stand is not None and hit is not None
+    surrender_rejection = _decision_rejection(
+        tuple(
+            player_action_decision(round_state, PlayerAction.SURRENDER)
+            for _, round_state in rounds
+        )
+    )
+    if surrender_rejection is not None:
+        surrender = _unavailable_terminal_forecast(*surrender_rejection)
+    else:
+        surrendered_rounds = tuple(
+            player_surrender(round_state) for _, round_state in rounds
+        )
+        assert all(
+            round_state.player_hands[0].status is HandStatus.SURRENDERED
+            for round_state in surrendered_rounds
+        )
+        surrender = ExactTerminalActionForecast(
+            contract="surrender_now",
+            status="available",
+            terminal="surrendered",
+        )
+
+    split = _split_forecast(
+        selected_state,
+        selected,
+        rounds,
+        evaluator,
+        hidden_states_evaluated=hidden.states_evaluated,
+        hidden_weight_mass=hidden_mass,
+    )
+
+    assert stand is not None
     return ExactActionForecastAnalysis(
         target_seat=target_seat,
         target_hand_id=target_hand_id,
         stand_now=stand,
         hit_once_then_stand=hit,
+        double_one_card_then_stand=double,
+        surrender_now=surrender,
+        split_one_card_each_then_stand=split,
     )

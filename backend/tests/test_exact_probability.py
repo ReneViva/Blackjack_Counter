@@ -22,6 +22,7 @@ from app.domain import (
 from app.engine import advance_dealer
 from app.probability import (
     ExactAnalysisError,
+    ExactDealerEvaluator,
     evaluate_exact_reference,
     possible_draws,
 )
@@ -135,6 +136,37 @@ def test_small_recursive_tree_matches_hand_calculation() -> None:
     assert first.push == 0.0
     assert first.loss == 0.5
     assert first.total == 1.0
+
+
+def test_multiple_hand_marginals_share_one_dealer_traversal() -> None:
+    state = dealer_round(
+        player_cards=(card(Rank.TEN, Suit.HEARTS), card(Rank.KING, Suit.HEARTS)),
+        dealer_cards=(card(Rank.SIX, Suit.DIAMONDS), card(Rank.TEN, Suit.CLUBS)),
+        shoe=shoe_with_ranks(**{"5": 1, "10": 1}),
+    )
+    second_hand = Hand(cards=(card(Rank.NINE), card(Rank.NINE, Suit.CLUBS)))
+    second_player = PlayerHandState(
+        seat=2,
+        hand=second_hand,
+        status=HandStatus.STOOD,
+        decision_count=1,
+    )
+    state = replace(
+        state,
+        game_state=replace(
+            state.game_state,
+            player_hands=(state.player_hands[0].hand, second_hand),
+        ),
+        player_hands=(state.player_hands[0], second_player),
+    )
+
+    shared = ExactDealerEvaluator()
+    shared_results = shared.evaluate_many(state, (0, 1))
+    separate = ExactDealerEvaluator()
+    separate_results = (separate.evaluate(state, 0), separate.evaluate(state, 1))
+
+    assert shared_results == separate_results
+    assert shared.metrics.states_evaluated < separate.metrics.states_evaluated
 
 
 def test_latent_or_unknown_state_is_rejected() -> None:

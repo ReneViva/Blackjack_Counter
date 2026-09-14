@@ -140,6 +140,14 @@ h1, h2, h3 { font-family: Georgia, "Times New Roman", serif; }
 .forecast-probabilities div { min-width: 0; }
 .forecast-probabilities dt { color: var(--muted); font-size: .58rem; text-transform: uppercase; }
 .forecast-probabilities dd { margin: .12rem 0 0; font-size: .78rem; font-weight: 850; }
+.forecast-terminal { margin: 0; }
+.forecast-terminal div { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; }
+.forecast-terminal dt, .forecast-split-children h5 { color: var(--muted); font-size: .58rem; text-transform: uppercase; }
+.forecast-terminal dd { margin: 0; font-size: .76rem; font-weight: 850; }
+.forecast-note { margin: .35rem 0 0; color: var(--muted); font-size: .62rem; }
+.forecast-split-children { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; }
+.forecast-split-children section { min-width: 0; border-radius: .5rem; padding: .5rem; background: rgb(0 0 0 / 10%); }
+.forecast-split-children h5 { margin: 0 0 .4rem; }
 .research-score-list { display: grid; gap: .48rem; }
 .research-score-card { border: 1px solid rgb(136 205 163 / 17%); border-radius: .65rem; padding: .68rem .75rem; background: rgb(255 255 255 / 3%); }
 .research-score-card > div { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }

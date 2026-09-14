@@ -7,6 +7,8 @@ from app.engine import build_table_state
 from app.probability import (
     ExactAnalysisError,
     ExactActionForecast,
+    ExactSplitActionForecast,
+    ExactTerminalActionForecast,
     analyze_exact_action_forecasts,
     analyze_exact_table,
     concrete_scenarios,
@@ -29,6 +31,8 @@ from app.schemas import (
     ExactActionForecastOptions,
     ExactActionForecastResponse,
     ExactActionForecastResultResponse,
+    ExactSplitActionForecastResultResponse,
+    ExactTerminalActionForecastResultResponse,
     ExactActionForecastScenarioAnalysisResponse,
     ExactActionForecastScenarioResponse,
     ExactActionForecastsResponse,
@@ -122,6 +126,66 @@ def _forecast_response(
     )
 
 
+def _terminal_forecast_response(
+    forecast: ExactTerminalActionForecast,
+) -> ExactTerminalActionForecastResultResponse:
+    if forecast.status == "unavailable":
+        return ExactTerminalActionForecastResultResponse(
+            status="unavailable",
+            error=APIErrorDetail(
+                code=forecast.code or "action_forecast_unavailable",
+                message=forecast.message or "The action forecast is unavailable.",
+            ),
+        )
+    return ExactTerminalActionForecastResultResponse(
+        status="available",
+        terminal=forecast.terminal,
+    )
+
+
+def _split_forecast_response(
+    forecast: ExactSplitActionForecast,
+    runtime_ms: float,
+) -> ExactSplitActionForecastResultResponse:
+    if forecast.status == "unavailable":
+        return ExactSplitActionForecastResultResponse(
+            status="unavailable",
+            error=APIErrorDetail(
+                code=forecast.code or "action_forecast_unavailable",
+                message=forecast.message or "The action forecast is unavailable.",
+            ),
+        )
+    assert (
+        forecast.child_hand_1 is not None
+        and forecast.child_hand_2 is not None
+        and forecast.metrics is not None
+    )
+    return ExactSplitActionForecastResultResponse(
+        status="available",
+        child_hand_1=OutcomeProbabilities(
+            win=forecast.child_hand_1.win,
+            push=forecast.child_hand_1.push,
+            loss=forecast.child_hand_1.loss,
+        ),
+        child_hand_2=OutcomeProbabilities(
+            win=forecast.child_hand_2.win,
+            push=forecast.child_hand_2.push,
+            loss=forecast.child_hand_2.loss,
+        ),
+        metadata=AnalysisMetadata(
+            states_evaluated=(
+                forecast.hidden_states_evaluated
+                + forecast.metrics.states_evaluated
+            ),
+            cache_hits=forecast.metrics.cache_hits,
+            cache_misses=forecast.metrics.cache_misses,
+            runtime_ms=runtime_ms,
+            hidden_states_evaluated=forecast.hidden_states_evaluated,
+            hidden_weight_mass=forecast.hidden_weight_mass,
+        ),
+    )
+
+
 def _action_forecast_result(
     payload: AnalysisRequest,
 ) -> ExactActionForecastResponse:
@@ -148,6 +212,13 @@ def _action_forecast_result(
             stand_now=_forecast_response(result.stand_now, runtime_ms),
             hit_once_then_stand=_forecast_response(
                 result.hit_once_then_stand, runtime_ms
+            ),
+            double_one_card_then_stand=_forecast_response(
+                result.double_one_card_then_stand, runtime_ms
+            ),
+            surrender_now=_terminal_forecast_response(result.surrender_now),
+            split_one_card_each_then_stand=_split_forecast_response(
+                result.split_one_card_each_then_stand, runtime_ms
             ),
         ),
     )

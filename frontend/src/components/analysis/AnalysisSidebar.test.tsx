@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ResearchDefinition } from "../../api/research";
@@ -39,7 +39,7 @@ function forecastResponse(
   handId = "seat-4-hand-1",
 ): Response {
   const result = (
-    contract: "stand_now" | "hit_once_then_stand",
+    contract: "stand_now" | "hit_once_then_stand" | "double_one_card_then_stand",
     win: number,
   ) => ({
     contract,
@@ -65,8 +65,86 @@ function forecastResponse(
       action_forecasts: {
         stand_now: result("stand_now", standWin),
         hit_once_then_stand: result("hit_once_then_stand", hitWin),
+        double_one_card_then_stand: result("double_one_card_then_stand", hitWin),
+        surrender_now: {
+          contract: "surrender_now",
+          status: "available",
+          method: "exact",
+          terminal: "surrendered",
+          error: null,
+        },
+        split_one_card_each_then_stand: {
+          contract: "split_one_card_each_then_stand",
+          status: "available",
+          method: "exact",
+          child_hand_1: { win: .3, push: .2, loss: .5 },
+          child_hand_2: { win: .25, push: .15, loss: .6 },
+          metadata: {
+            states_evaluated: 20,
+            cache_hits: 4,
+            cache_misses: 16,
+            runtime_ms: 2,
+            hidden_states_evaluated: 0,
+            hidden_weight_mass: 1,
+          },
+          error: null,
+        },
       },
     }),
+  } as Response;
+}
+
+function unavailableExtendedForecastResponse(): Response {
+  const base = forecastResponse(.4, .2);
+  return {
+    ok: true,
+    status: 200,
+    json: async () => {
+      const payload = await base.json();
+      const unavailable = (contract: string, code: string, message: string) => ({
+        contract,
+        status: "unavailable",
+        method: "exact",
+        outcomes: null,
+        metadata: null,
+        error: { code, message, field: null },
+      });
+      return {
+        ...payload,
+        action_forecasts: {
+          ...payload.action_forecasts,
+          double_one_card_then_stand: unavailable(
+            "double_one_card_then_stand",
+            "double_not_allowed",
+            "Doubling is not allowed.",
+          ),
+          surrender_now: {
+            contract: "surrender_now",
+            status: "unavailable",
+            method: "exact",
+            terminal: null,
+            error: {
+              code: "surrender_not_allowed",
+              message: "Late surrender is not allowed for this hand.",
+              field: null,
+            },
+          },
+          split_one_card_each_then_stand: {
+            contract: "split_one_card_each_then_stand",
+            status: "unavailable",
+            method: "exact",
+            child_hand_1: null,
+            child_hand_2: null,
+            metadata: null,
+            error: {
+              code: "exact_pair_required",
+              message: "Splitting requires two known cards of the same exact rank.",
+              field: null,
+            },
+          },
+        },
+      };
+    },
   } as Response;
 }
 
@@ -145,6 +223,16 @@ describe("automatic analysis sidebar", () => {
     expect(screen.getByRole("heading", { name: "Selected-hand outcomes" })).toBeVisible();
     expect(screen.getByLabelText("Stand now forecast")).toHaveTextContent("40.0%");
     expect(screen.getByLabelText("Hit once, then stand forecast")).toHaveTextContent("20.0%");
+    expect(screen.getByLabelText("Double — one card, then stand forecast")).toHaveTextContent("20.0%");
+    const surrender = screen.getByLabelText("Surrender now forecast");
+    expect(surrender).toHaveTextContent("Terminal outcomeSurrendered");
+    expect(surrender).toHaveTextContent("No further cards are drawn.");
+    expect(within(surrender).queryByText(/Win|Push|Loss/)).not.toBeInTheDocument();
+    const split = screen.getByLabelText("Split one card to each hand, then stand forecast");
+    expect(within(split).getByRole("heading", { name: "Hand 1" })).toBeVisible();
+    expect(within(split).getByRole("heading", { name: "Hand 2" })).toBeVisible();
+    expect(split).toHaveTextContent("30.0%");
+    expect(split).toHaveTextContent("25.0%");
     expect(screen.getByText("Exact finite-shoe")).toBeVisible();
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual(expect.arrayContaining([
@@ -153,6 +241,7 @@ describe("automatic analysis sidebar", () => {
     ]));
     expect(screen.queryByText(/Suggested (Hit|Stand|Double|Split)/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Better|Best|Recommended|Choose|Optimal/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Payout|Wager|Stake|Expected value|Advantage/i)).not.toBeInTheDocument();
   });
 
   it("shows understandable loading and unavailable states for forecasts", async () => {
@@ -176,6 +265,34 @@ describe("automatic analysis sidebar", () => {
     expect(await screen.findByText("Calculating exact hypothetical outcomes...", {}, { timeout: 1500 })).toBeVisible();
     rerender(<AnalysisSidebar activeTarget={null} state={state} />);
     expect(await screen.findByText("Select a primary hand to calculate its hypothetical outcomes.", {}, { timeout: 1500 })).toBeVisible();
+  });
+
+  it("renders independent backend explanations for unavailable extended actions", async () => {
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      if (!url.endsWith("/analyze")) return researchResponse(0);
+      const body = JSON.parse(init.body as string);
+      return body.options.method === "exact_action_forecast"
+        ? unavailableExtendedForecastResponse()
+        : exactResponse(.5);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <AnalysisSidebar
+        activeTarget={{ kind: "player-hand", seat: 4, handId: "seat-4-hand-1" }}
+        state={startedState()}
+      />,
+    );
+
+    expect(await screen.findByLabelText("Double — one card, then stand forecast", {}, { timeout: 1500 })).toHaveTextContent(
+      "Unavailable. Doubling is not allowed.",
+    );
+    expect(screen.getByLabelText("Surrender now forecast")).toHaveTextContent(
+      "Unavailable. Late surrender is not allowed for this hand.",
+    );
+    expect(screen.getByLabelText("Split one card to each hand, then stand forecast")).toHaveTextContent(
+      "Unavailable. Splitting requires two known cards of the same exact rank.",
+    );
   });
 
   it("does not let an older hand forecast overwrite the newly selected split hand", async () => {

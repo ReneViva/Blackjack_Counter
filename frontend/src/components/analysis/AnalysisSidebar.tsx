@@ -8,6 +8,9 @@ import {
   type ExactActionForecastResponse,
   type ExactActionForecastResult,
   type ExactAnalysisResponse,
+  type ExactSplitActionForecastResult,
+  type ExactTerminalActionForecastResult,
+  type OutcomeProbabilities,
 } from "../../api/analysis";
 import {
   RESEARCH_DEFINITIONS,
@@ -43,14 +46,73 @@ function ForecastOutcomes({
     <article className="forecast-card" aria-label={`${label} forecast`}>
       <h4>{label}</h4>
       {forecast.status === "available" && forecast.outcomes ? (
-        <dl className="forecast-probabilities">
-          <div><dt>Win</dt><dd>{percentage(forecast.outcomes.win)}</dd></div>
-          <div><dt>Push</dt><dd>{percentage(forecast.outcomes.push)}</dd></div>
-          <div><dt>Loss</dt><dd>{percentage(forecast.outcomes.loss)}</dd></div>
-        </dl>
+        <ForecastProbabilityList outcomes={forecast.outcomes} />
       ) : (
         <p className="calm-status">
+          <strong>Unavailable.</strong>{" "}
           {forecast.error?.message ?? "This hypothetical action is unavailable."}
+        </p>
+      )}
+    </article>
+  );
+}
+
+function ForecastProbabilityList({ outcomes }: Readonly<{
+  outcomes: OutcomeProbabilities;
+}>) {
+  return (
+    <dl className="forecast-probabilities">
+      <div><dt>Win</dt><dd>{percentage(outcomes.win)}</dd></div>
+      <div><dt>Push</dt><dd>{percentage(outcomes.push)}</dd></div>
+      <div><dt>Loss</dt><dd>{percentage(outcomes.loss)}</dd></div>
+    </dl>
+  );
+}
+
+function TerminalForecast({ forecast }: Readonly<{
+  forecast: ExactTerminalActionForecastResult;
+}>) {
+  return (
+    <article className="forecast-card" aria-label="Surrender now forecast">
+      <h4>Surrender now</h4>
+      {forecast.status === "available" && forecast.terminal === "surrendered" ? (
+        <>
+          <dl className="forecast-terminal">
+            <div><dt>Terminal outcome</dt><dd>Surrendered</dd></div>
+          </dl>
+          <p className="forecast-note">No further cards are drawn.</p>
+        </>
+      ) : (
+        <p className="calm-status">
+          <strong>Unavailable.</strong>{" "}
+          {forecast.error?.message ?? "Surrender is unavailable."}
+        </p>
+      )}
+    </article>
+  );
+}
+
+function SplitForecast({ forecast }: Readonly<{
+  forecast: ExactSplitActionForecastResult;
+}>) {
+  return (
+    <article className="forecast-card forecast-card--split" aria-label="Split one card to each hand, then stand forecast">
+      <h4>Split — one card to each hand, then stand</h4>
+      {forecast.status === "available" && forecast.child_hand_1 && forecast.child_hand_2 ? (
+        <div className="forecast-split-children">
+          <section aria-labelledby="split-child-1-title">
+            <h5 id="split-child-1-title">Hand 1</h5>
+            <ForecastProbabilityList outcomes={forecast.child_hand_1} />
+          </section>
+          <section aria-labelledby="split-child-2-title">
+            <h5 id="split-child-2-title">Hand 2</h5>
+            <ForecastProbabilityList outcomes={forecast.child_hand_2} />
+          </section>
+        </div>
+      ) : (
+        <p className="calm-status">
+          <strong>Unavailable.</strong>{" "}
+          {forecast.error?.message ?? "Split is unavailable."}
         </p>
       )}
     </article>
@@ -304,6 +366,16 @@ export default function AnalysisSidebar({ activeTarget = null, state }: Analysis
             <ForecastOutcomes
               forecast={forecasts.action_forecasts.hit_once_then_stand}
               label="Hit once, then stand"
+            />
+            <ForecastOutcomes
+              forecast={forecasts.action_forecasts.double_one_card_then_stand}
+              label="Double — one card, then stand"
+            />
+            <TerminalForecast
+              forecast={forecasts.action_forecasts.surrender_now}
+            />
+            <SplitForecast
+              forecast={forecasts.action_forecasts.split_one_card_each_then_stand}
             />
           </div>
         ) : (

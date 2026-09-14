@@ -46,10 +46,26 @@ export type ComparisonOutcome = Readonly<{
 
 type ErrorDetail = Readonly<{ code: string; message: string; field: string | null }>;
 export type ExactActionForecastResult = Readonly<{
-  contract: "stand_now" | "hit_once_then_stand";
+  contract: "stand_now" | "hit_once_then_stand" | "double_one_card_then_stand";
   status: "available" | "unavailable";
   method: "exact";
   outcomes: OutcomeProbabilities | null;
+  metadata: ExactAnalysisResponse["metadata"] | null;
+  error: ErrorDetail | null;
+}>;
+export type ExactTerminalActionForecastResult = Readonly<{
+  contract: "surrender_now";
+  status: "available" | "unavailable";
+  method: "exact";
+  terminal: "surrendered" | null;
+  error: ErrorDetail | null;
+}>;
+export type ExactSplitActionForecastResult = Readonly<{
+  contract: "split_one_card_each_then_stand";
+  status: "available" | "unavailable";
+  method: "exact";
+  child_hand_1: OutcomeProbabilities | null;
+  child_hand_2: OutcomeProbabilities | null;
   metadata: ExactAnalysisResponse["metadata"] | null;
   error: ErrorDetail | null;
 }>;
@@ -59,6 +75,9 @@ export type ExactActionForecastResponse = Readonly<{
   action_forecasts: Readonly<{
     stand_now: ExactActionForecastResult;
     hit_once_then_stand: ExactActionForecastResult;
+    double_one_card_then_stand: ExactActionForecastResult;
+    surrender_now: ExactTerminalActionForecastResult;
+    split_one_card_each_then_stand: ExactSplitActionForecastResult;
   }>;
 }>;
 export type CompareAnalysisResponse = Readonly<{

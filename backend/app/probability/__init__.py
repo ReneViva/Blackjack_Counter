@@ -1,7 +1,9 @@
 from .analysis import (
     ExactActionForecast,
     ExactActionForecastAnalysis,
+    ExactSplitActionForecast,
     ExactTableAnalysis,
+    ExactTerminalActionForecast,
     analyze_exact_action_forecasts,
     analyze_exact_table,
     build_dealer_completion_round,
@@ -51,6 +53,8 @@ __all__ = [
     "ExactTableAnalysis",
     "ExactActionForecast",
     "ExactActionForecastAnalysis",
+    "ExactSplitActionForecast",
+    "ExactTerminalActionForecast",
     "ExactAnalysisError",
     "ExactEvaluation",
     "ExactDealerEvaluator",

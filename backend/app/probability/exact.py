@@ -61,6 +61,9 @@ class ExactDealerEvaluator:
             raise ValueError("max_states must be a positive integer")
         self._max_states = max_states
         self._cache: dict[CanonicalKey, OutcomeDistribution] = {}
+        self._multi_cache: dict[
+            CanonicalKey, tuple[OutcomeDistribution, ...]
+        ] = {}
         self._cache_hits = 0
         self._cache_misses = 0
 
@@ -120,6 +123,75 @@ class ExactDealerEvaluator:
                 "Exact outcome probability mass does not sum to one.",
             )
         return result
+
+    def evaluate_many(
+        self,
+        state: RoundState,
+        target_hand_indices: tuple[int, ...],
+    ) -> tuple[OutcomeDistribution, ...]:
+        """Resolve one dealer tree for multiple player-hand marginals."""
+        if not target_hand_indices:
+            raise ValueError("target_hand_indices must not be empty")
+        for target_hand_index in target_hand_indices:
+            _require_known_state(state, target_hand_index)
+
+        def evaluate_current(
+            current: RoundState,
+        ) -> tuple[OutcomeDistribution, ...]:
+            single_key = canonical_round_key(current, 0)
+            key: CanonicalKey = (
+                "exact_dealer_completion_many_v1",
+                *single_key[1:-1],
+                target_hand_indices,
+            )
+            cached = self._multi_cache.get(key)
+            if cached is not None:
+                self._cache_hits += 1
+                return cached
+            if self._cache_misses >= self._max_states:
+                raise ExactAnalysisError(
+                    "exact_computation_limit",
+                    "Exact analysis exceeded the configured state limit.",
+                )
+            self._cache_misses += 1
+            result = _evaluate_state_many(
+                current,
+                target_hand_indices,
+                evaluate_current,
+            )
+            self._multi_cache[key] = result
+            return result
+
+        results = evaluate_current(state)
+        if any(abs(result.total - 1.0) > 1e-10 for result in results):
+            raise ExactAnalysisError(
+                "probability_mass_invalid",
+                "Exact outcome probability mass does not sum to one.",
+            )
+        return results
+
+    def evaluate_weighted_many(
+        self,
+        branches: Iterable[tuple[float, RoundState]],
+        target_hand_indices: tuple[int, ...],
+    ) -> tuple[OutcomeDistribution, ...]:
+        evaluated = tuple(
+            (weight, self.evaluate_many(state, target_hand_indices))
+            for weight, state in branches
+        )
+        results = tuple(
+            weighted_sum(
+                (weight, branch_results[result_index])
+                for weight, branch_results in evaluated
+            )
+            for result_index in range(len(target_hand_indices))
+        )
+        if any(abs(result.total - 1.0) > 1e-10 for result in results):
+            raise ExactAnalysisError(
+                "probability_mass_invalid",
+                "Exact outcome probability mass does not sum to one.",
+            )
+        return results
 
 
 def _require_known_state(state: RoundState, target_hand_index: int) -> None:
@@ -221,6 +293,52 @@ def _evaluate_state(
             ),
         )
         for draw in draws
+    )
+
+
+def _evaluate_state_many(
+    state: RoundState,
+    target_hand_indices: tuple[int, ...],
+    evaluate_next: Callable[
+        [RoundState], tuple[OutcomeDistribution, ...]
+    ],
+) -> tuple[OutcomeDistribution, ...]:
+    if state.phase is RoundPhase.ROUND_COMPLETE:
+        outcomes = resolve_outcomes(state)
+        distributions: list[OutcomeDistribution] = []
+        for target_hand_index in target_hand_indices:
+            outcome = outcomes[target_hand_index]
+            if outcome is None:
+                raise ExactAnalysisError(
+                    "exact_analysis_requires_resolved_hidden_composition",
+                    "The terminal outcome remains indeterminate.",
+                )
+            distributions.append(OutcomeDistribution.terminal(outcome))
+        return tuple(distributions)
+
+    dealer = evaluate_dealer(state.game_state.dealer_hand, state.game_state.rules)
+    if dealer.status is not DealerStatus.HIT_REQUIRED:
+        return evaluate_next(advance_dealer(state))
+
+    draws = possible_draws(state.game_state.shoe)
+    if not draws:
+        raise ExactAnalysisError(
+            "exact_shoe_exhausted",
+            "The dealer must draw, but the exact shoe is empty.",
+        )
+    evaluated = tuple(
+        (
+            draw.probability,
+            evaluate_next(advance_dealer(state, draw.card)),
+        )
+        for draw in draws
+    )
+    return tuple(
+        weighted_sum(
+            (weight, branch_results[result_index])
+            for weight, branch_results in evaluated
+        )
+        for result_index in range(len(target_hand_indices))
     )
 
 
