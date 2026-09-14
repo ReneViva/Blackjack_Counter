@@ -62,7 +62,10 @@ def test_invalid_deck_scenario_is_labeled_instead_of_dropped() -> None:
     assert len(payload["scenarios"]) == 8
     assert payload["scenarios"][0]["assumptions"]["decks"] == 1
     assert payload["scenarios"][0]["status"] == "invalid"
-    assert payload["scenarios"][0]["error"]["code"] == "invalid_state"
+    assert (
+        payload["scenarios"][0]["error"]["code"]
+        == "exact_card_multiplicity_exceeded"
+    )
     assert all(item["status"] == "complete" for item in payload["scenarios"][1:])
 
 

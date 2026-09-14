@@ -44,7 +44,36 @@ export type ComparisonOutcome = Readonly<{
   exact_in_confidence_interval: boolean;
 }>;
 
-type ErrorDetail = Readonly<{ code: string; message: string; field: string | null }>;
+export type ErrorDetail = Readonly<{ code: string; message: string; field: string | null }>;
+export type ProbabilityRange = Readonly<{ minimum: number; maximum: number }>;
+export type OutcomeRanges = Readonly<{
+  win: ProbabilityRange;
+  push: ProbabilityRange;
+  loss: ProbabilityRange;
+}>;
+export type ExcludedDeckCount = Readonly<{
+  deck_count: number;
+  code: string;
+  message: string;
+}>;
+export type OutcomeModelSummary = Readonly<{
+  outcomes: OutcomeProbabilities;
+  ranges: OutcomeRanges;
+}>;
+type DeckSummaryMetadata = Readonly<{
+  method: "uniform_valid_deck_count_mean";
+  assumption: "equal_weight_valid_deck_counts";
+  dealer_soft_17: "hit" | "stand";
+  status: "available" | "unavailable";
+  candidate_deck_counts: readonly number[];
+  included_deck_counts: readonly number[];
+  excluded_deck_counts: readonly ExcludedDeckCount[];
+  error: ErrorDetail | null;
+}>;
+export type UniformDeckCountSummary = DeckSummaryMetadata & Readonly<{
+  outcomes: OutcomeProbabilities | null;
+  ranges: OutcomeRanges | null;
+}>;
 export type ExactActionForecastResult = Readonly<{
   contract: "stand_now" | "hit_once_then_stand" | "double_one_card_then_stand";
   status: "available" | "unavailable";
@@ -80,6 +109,43 @@ export type ExactActionForecastResponse = Readonly<{
     split_one_card_each_then_stand: ExactSplitActionForecastResult;
   }>;
 }>;
+export type UniformActionSummary = Readonly<{
+  contract: "stand_now" | "hit_once_then_stand" | "double_one_card_then_stand" |
+    "surrender_now" | "split_one_card_each_then_stand";
+  status: "available" | "unavailable";
+  outcomes: OutcomeProbabilities | null;
+  ranges: OutcomeRanges | null;
+  terminal: "surrendered" | null;
+  child_hand_1: OutcomeModelSummary | null;
+  child_hand_2: OutcomeModelSummary | null;
+  error: ErrorDetail | null;
+}>;
+export type UniformActionDeckCountSummary = DeckSummaryMetadata & Readonly<{
+  action_forecasts: Readonly<{
+    stand_now: UniformActionSummary;
+    hit_once_then_stand: UniformActionSummary;
+    double_one_card_then_stand: UniformActionSummary;
+    surrender_now: UniformActionSummary;
+    split_one_card_each_then_stand: UniformActionSummary;
+  }> | null;
+}>;
+export type ExactActionForecastScenarioAnalysisResponse = Readonly<{
+  method: "exact_action_forecast";
+  model_uncertainty: readonly ("deck_count" | "dealer_soft_17")[];
+  aggregation: "none";
+  resource_limit_scope?: "per_scenario";
+  exact_state_limit_per_scenario?: number;
+  scenarios: readonly Readonly<{
+    assumptions: Readonly<{ decks: number; dealer_soft_17: "hit" | "stand" }>;
+    status: "complete" | "invalid" | "unavailable";
+    result: ExactActionForecastResponse | null;
+    error: ErrorDetail | null;
+  }>[];
+  deck_count_summaries: readonly UniformActionDeckCountSummary[];
+}>;
+export type ActionForecastResponse =
+  | ExactActionForecastResponse
+  | ExactActionForecastScenarioAnalysisResponse;
 export type CompareAnalysisResponse = Readonly<{
   method: "compare";
   status: "complete" | "exact_unavailable";
@@ -95,12 +161,15 @@ export type ScenarioAnalysisResponse = Readonly<{
   method: AnalysisMethod;
   model_uncertainty: readonly ("deck_count" | "dealer_soft_17")[];
   aggregation: "none";
+  resource_limit_scope?: "per_scenario";
+  exact_state_limit_per_scenario?: number;
   scenarios: readonly Readonly<{
     assumptions: Readonly<{ decks: number; dealer_soft_17: "hit" | "stand" }>;
-    status: "complete" | "invalid";
+    status: "complete" | "invalid" | "unavailable";
     result: SingleAnalysisResponse | null;
     error: ErrorDetail | null;
   }>[];
+  deck_count_summaries?: readonly UniformDeckCountSummary[];
 }>;
 export type AnalysisResponse = SingleAnalysisResponse | ScenarioAnalysisResponse;
 export type AnalysisOptions =
@@ -132,12 +201,12 @@ function isAnalysisResponse(value: unknown): value is AnalysisResponse {
     (Array.isArray(candidate.scenarios) || "state_summary" in candidate);
 }
 
-function isActionForecastResponse(value: unknown): value is ExactActionForecastResponse {
+function isActionForecastResponse(value: unknown): value is ActionForecastResponse {
   if (typeof value !== "object" || value === null) return false;
-  const candidate = value as { method?: unknown; action_forecasts?: unknown };
+  const candidate = value as { method?: unknown; action_forecasts?: unknown; scenarios?: unknown };
   return candidate.method === "exact_action_forecast" &&
-    typeof candidate.action_forecasts === "object" &&
-    candidate.action_forecasts !== null;
+    ((typeof candidate.action_forecasts === "object" && candidate.action_forecasts !== null) ||
+      Array.isArray(candidate.scenarios));
 }
 
 export async function analyze(state: SessionState, options: AnalysisOptions, signal?: AbortSignal, analysisTarget: TableTarget | null = null): Promise<AnalysisResponse> {
@@ -164,7 +233,7 @@ export async function analyzeActionForecast(
   state: SessionState,
   target: Extract<TableTarget, { kind: "player-hand" }> | null,
   signal?: AbortSignal,
-): Promise<ExactActionForecastResponse> {
+): Promise<ActionForecastResponse> {
   const response = await fetch(`${getApiBaseUrl()}/analyze`, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },

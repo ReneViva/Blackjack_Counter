@@ -39,6 +39,11 @@ from .monte_carlo import (
     OutcomeCounts,
     simulate_table,
 )
+from .model_uncertainty import (
+    OutcomeModelSummary,
+    ProbabilityRange,
+    summarize_outcomes,
+)
 from .scenarios import (
     ConcreteScenario,
     ScenarioAssumptions,
@@ -63,9 +68,11 @@ __all__ = [
     "MAX_SIMULATIONS",
     "MonteCarloEvaluation",
     "OutcomeDistribution",
+    "OutcomeModelSummary",
     "OutcomeCounts",
     "OutcomeComparison",
     "PossibleDraw",
+    "ProbabilityRange",
     "ScenarioAssumptions",
     "ScenarioPlan",
     "WilsonInterval",
@@ -84,6 +91,7 @@ __all__ = [
     "possible_draws",
     "sample_hidden_state",
     "simulate_table",
+    "summarize_outcomes",
     "weighted_sum",
     "wilson_interval",
 ]

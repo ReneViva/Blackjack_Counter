@@ -132,7 +132,7 @@ describe("analysis panel", () => {
     expect(screen.getAllByText(/Sampling CI:/)).toHaveLength(3);
   });
 
-  it("labels model-uncertainty scenarios without averaging", async () => {
+  it("renders a separate deck-count summary and accessible exact scenarios", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -151,13 +151,39 @@ describe("analysis panel", () => {
           },
           error: null,
         }],
+        deck_count_summaries: [{
+          method: "uniform_valid_deck_count_mean",
+          assumption: "equal_weight_valid_deck_counts",
+          dealer_soft_17: "stand",
+          status: "available",
+          candidate_deck_counts: [1, 2],
+          included_deck_counts: [1],
+          excluded_deck_counts: [{ deck_count: 2, code: "exact_card_multiplicity_exceeded", message: "Observed cards exceed a two-deck shoe." }],
+          outcomes: { win: 0.5, push: 0, loss: 0.5 },
+          ranges: {
+            win: { minimum: 0.5, maximum: 0.5 },
+            push: { minimum: 0, maximum: 0 },
+            loss: { minimum: 0.5, maximum: 0.5 },
+          },
+          error: null,
+        }],
       }),
     } as Response));
     render(<AnalysisPanel state={state} />);
     fireEvent.click(screen.getByRole("button", { name: "Run analysis" }));
 
-    expect(await screen.findByText(/Model uncertainty is shown as separate scenarios/)).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "STAND · Uniform deck-count summary" })).toBeVisible();
+    expect(screen.getByText(/Equal-weight assumption across valid deck counts/)).toBeVisible();
+    expect(screen.getByText(/Valid deck scenarios: 1 \/ 2/)).toBeVisible();
+    expect(screen.getByText(/2 decks excluded — Observed cards exceed/)).toBeVisible();
+    expect(screen.getAllByText(/model range/i)).toHaveLength(3);
+    const disclosure = screen.getByText("Show deck scenarios");
+    expect(disclosure.parentElement).not.toHaveAttribute("open");
+    fireEvent.click(disclosure);
+    expect(disclosure.parentElement).toHaveAttribute("open");
     expect(screen.getByText(/1 deck · dealer stands on soft 17/)).toBeVisible();
-    expect(screen.getByText(/no averaging is applied/)).toBeVisible();
+    fireEvent.click(disclosure);
+    expect(disclosure.parentElement).not.toHaveAttribute("open");
+    expect(screen.queryByText(/95% CI/)).not.toBeInTheDocument();
   });
 });

@@ -3,16 +3,19 @@ from time import perf_counter
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from app.engine import build_table_state
+from app.domain import DealerSoft17
+from app.engine import build_table_state, validate_table_state
 from app.probability import (
     ExactAnalysisError,
     ExactActionForecast,
     ExactSplitActionForecast,
     ExactTerminalActionForecast,
+    OutcomeDistribution,
     analyze_exact_action_forecasts,
     analyze_exact_table,
     concrete_scenarios,
     simulate_table,
+    summarize_outcomes,
     wilson_interval,
 )
 from app.schemas import (
@@ -47,7 +50,15 @@ from app.schemas import (
     MonteCarloScenarioResponse,
     OutcomeCountsResponse,
     OutcomeProbabilities,
+    OutcomeModelSummaryResponse,
+    OutcomeRangesResponse,
+    ProbabilityRangeResponse,
+    ExcludedDeckCountResponse,
     ScenarioAssumptionsResponse,
+    UniformActionDeckCountSummaryResponse,
+    UniformActionForecastsResponse,
+    UniformActionSummaryResponse,
+    UniformDeckCountSummaryResponse,
 )
 
 
@@ -224,6 +235,302 @@ def _action_forecast_result(
     )
 
 
+def _summary_values(
+    outcomes: list[OutcomeProbabilities],
+) -> OutcomeModelSummaryResponse:
+    summary = summarize_outcomes(
+        OutcomeDistribution(win=value.win, push=value.push, loss=value.loss)
+        for value in outcomes
+    )
+    return OutcomeModelSummaryResponse(
+        outcomes=OutcomeProbabilities(
+            win=summary.outcomes.win,
+            push=summary.outcomes.push,
+            loss=summary.outcomes.loss,
+        ),
+        ranges=OutcomeRangesResponse(
+            win=ProbabilityRangeResponse(
+                minimum=summary.win_range.minimum,
+                maximum=summary.win_range.maximum,
+            ),
+            push=ProbabilityRangeResponse(
+                minimum=summary.push_range.minimum,
+                maximum=summary.push_range.maximum,
+            ),
+            loss=ProbabilityRangeResponse(
+                minimum=summary.loss_range.minimum,
+                maximum=summary.loss_range.maximum,
+            ),
+        ),
+    )
+
+
+def _summary_error(code: str, message: str) -> APIErrorDetail:
+    return APIErrorDetail(code=code, message=message)
+
+
+def _deck_model_metadata(
+    scenarios: list[ExactScenarioResponse] | list[ExactActionForecastScenarioResponse],
+    dealer_soft_17: DealerSoft17,
+) -> tuple[list[int], list[ExcludedDeckCountResponse]]:
+    group = [
+        scenario
+        for scenario in scenarios
+        if scenario.assumptions.dealer_soft_17 is dealer_soft_17
+    ]
+    included = sorted(
+        scenario.assumptions.decks
+        for scenario in group
+        if scenario.status != "invalid"
+    )
+    excluded = [
+        ExcludedDeckCountResponse(
+            deck_count=scenario.assumptions.decks,
+            code=(scenario.error.code if scenario.error else "invalid_model"),
+            message=(
+                scenario.error.message
+                if scenario.error
+                else "The deck-count model is physically invalid."
+            ),
+        )
+        for scenario in group
+        if scenario.status == "invalid"
+    ]
+    return included, excluded
+
+
+def _exact_deck_summaries(
+    scenarios: list[ExactScenarioResponse],
+) -> list[UniformDeckCountSummaryResponse]:
+    summaries: list[UniformDeckCountSummaryResponse] = []
+    rules = sorted(
+        {scenario.assumptions.dealer_soft_17 for scenario in scenarios},
+        key=lambda value: value.value,
+    )
+    for rule in rules:
+        group = [
+            scenario
+            for scenario in scenarios
+            if scenario.assumptions.dealer_soft_17 is rule
+        ]
+        included, excluded = _deck_model_metadata(scenarios, rule)
+        base = dict(
+            dealer_soft_17=rule,
+            candidate_deck_counts=list(range(1, 9)),
+            included_deck_counts=included,
+            excluded_deck_counts=excluded,
+        )
+        if not included:
+            summaries.append(
+                UniformDeckCountSummaryResponse(
+                    **base,
+                    status="unavailable",
+                    error=_summary_error(
+                        "no_valid_deck_models",
+                        "No physically valid deck-count models are available.",
+                    ),
+                )
+            )
+            continue
+        complete = [
+            scenario
+            for scenario in group
+            if scenario.status == "complete" and scenario.result is not None
+        ]
+        if len(complete) != len(included):
+            summaries.append(
+                UniformDeckCountSummaryResponse(
+                    **base,
+                    status="unavailable",
+                    error=_summary_error(
+                        "deck_model_analysis_unavailable",
+                        "At least one valid deck-count model could not be evaluated within the exact resource limit.",
+                    ),
+                )
+            )
+            continue
+        values = _summary_values([scenario.result.outcomes for scenario in complete])
+        summaries.append(
+            UniformDeckCountSummaryResponse(
+                **base,
+                status="available",
+                outcomes=values.outcomes,
+                ranges=values.ranges,
+            )
+        )
+    return summaries
+
+
+def _action_outcome_summary(
+    contract: str,
+    values: list[ExactActionForecastResultResponse],
+) -> UniformActionSummaryResponse:
+    available = [value for value in values if value.status == "available"]
+    if len(available) != len(values) or any(value.outcomes is None for value in available):
+        error = next((value.error for value in values if value.error is not None), None)
+        if available:
+            error = _summary_error(
+                "action_availability_varies_by_deck_count",
+                "This action is not available across every valid deck-count model.",
+            )
+        return UniformActionSummaryResponse(
+            contract=contract,
+            status="unavailable",
+            error=error or _summary_error(
+                "action_forecast_unavailable",
+                "This action is unavailable for every valid deck-count model.",
+            ),
+        )
+    summary = _summary_values([value.outcomes for value in available if value.outcomes])
+    return UniformActionSummaryResponse(
+        contract=contract,
+        status="available",
+        outcomes=summary.outcomes,
+        ranges=summary.ranges,
+    )
+
+
+def _terminal_action_summary(
+    values: list[ExactTerminalActionForecastResultResponse],
+) -> UniformActionSummaryResponse:
+    if values and all(
+        value.status == "available" and value.terminal == "surrendered"
+        for value in values
+    ):
+        return UniformActionSummaryResponse(
+            contract="surrender_now", status="available", terminal="surrendered"
+        )
+    available_count = sum(value.status == "available" for value in values)
+    error = next((value.error for value in values if value.error is not None), None)
+    if available_count:
+        error = _summary_error(
+            "action_availability_varies_by_deck_count",
+            "Surrender is not available across every valid deck-count model.",
+        )
+    return UniformActionSummaryResponse(
+        contract="surrender_now",
+        status="unavailable",
+        error=error or _summary_error(
+            "action_forecast_unavailable",
+            "Surrender is unavailable for every valid deck-count model.",
+        ),
+    )
+
+
+def _split_action_summary(
+    values: list[ExactSplitActionForecastResultResponse],
+) -> UniformActionSummaryResponse:
+    available = [value for value in values if value.status == "available"]
+    if (
+        len(available) != len(values)
+        or any(value.child_hand_1 is None for value in available)
+        or any(value.child_hand_2 is None for value in available)
+    ):
+        error = next((value.error for value in values if value.error is not None), None)
+        if available:
+            error = _summary_error(
+                "action_availability_varies_by_deck_count",
+                "Split is not available across every valid deck-count model.",
+            )
+        return UniformActionSummaryResponse(
+            contract="split_one_card_each_then_stand",
+            status="unavailable",
+            error=error or _summary_error(
+                "action_forecast_unavailable",
+                "Split is unavailable for every valid deck-count model.",
+            ),
+        )
+    return UniformActionSummaryResponse(
+        contract="split_one_card_each_then_stand",
+        status="available",
+        child_hand_1=_summary_values(
+            [value.child_hand_1 for value in available if value.child_hand_1]
+        ),
+        child_hand_2=_summary_values(
+            [value.child_hand_2 for value in available if value.child_hand_2]
+        ),
+    )
+
+
+def _action_deck_summaries(
+    scenarios: list[ExactActionForecastScenarioResponse],
+) -> list[UniformActionDeckCountSummaryResponse]:
+    summaries: list[UniformActionDeckCountSummaryResponse] = []
+    rules = sorted(
+        {scenario.assumptions.dealer_soft_17 for scenario in scenarios},
+        key=lambda value: value.value,
+    )
+    for rule in rules:
+        group = [
+            scenario
+            for scenario in scenarios
+            if scenario.assumptions.dealer_soft_17 is rule
+        ]
+        included, excluded = _deck_model_metadata(scenarios, rule)
+        base = dict(
+            dealer_soft_17=rule,
+            candidate_deck_counts=list(range(1, 9)),
+            included_deck_counts=included,
+            excluded_deck_counts=excluded,
+        )
+        complete = [
+            scenario.result
+            for scenario in group
+            if scenario.status == "complete" and scenario.result is not None
+        ]
+        if not included:
+            summaries.append(
+                UniformActionDeckCountSummaryResponse(
+                    **base,
+                    status="unavailable",
+                    error=_summary_error(
+                        "no_valid_deck_models",
+                        "No physically valid deck-count models are available.",
+                    ),
+                )
+            )
+            continue
+        if len(complete) != len(included):
+            summaries.append(
+                UniformActionDeckCountSummaryResponse(
+                    **base,
+                    status="unavailable",
+                    error=_summary_error(
+                        "deck_model_analysis_unavailable",
+                        "At least one valid deck-count model could not be evaluated within the exact resource limit.",
+                    ),
+                )
+            )
+            continue
+        forecasts = [result.action_forecasts for result in complete]
+        summaries.append(
+            UniformActionDeckCountSummaryResponse(
+                **base,
+                status="available",
+                action_forecasts=UniformActionForecastsResponse(
+                    stand_now=_action_outcome_summary(
+                        "stand_now", [value.stand_now for value in forecasts]
+                    ),
+                    hit_once_then_stand=_action_outcome_summary(
+                        "hit_once_then_stand",
+                        [value.hit_once_then_stand for value in forecasts],
+                    ),
+                    double_one_card_then_stand=_action_outcome_summary(
+                        "double_one_card_then_stand",
+                        [value.double_one_card_then_stand for value in forecasts],
+                    ),
+                    surrender_now=_terminal_action_summary(
+                        [value.surrender_now for value in forecasts]
+                    ),
+                    split_one_card_each_then_stand=_split_action_summary(
+                        [value.split_one_card_each_then_stand for value in forecasts]
+                    ),
+                ),
+            )
+        )
+    return summaries
+
+
 def _monte_carlo_result(payload: AnalysisRequest) -> MonteCarloAnalysisResponse:
     assert isinstance(
         payload.options, (MonteCarloAnalysisOptions, CompareAnalysisOptions)
@@ -374,22 +681,18 @@ def analyze_exact(
             dealer_soft_17=scenario.assumptions.dealer_soft_17,
         )
         concrete_request = payload.model_copy(update={"state": scenario.state})
-        try:
-            if isinstance(payload.options, ExactActionForecastOptions):
-                result = _action_forecast_result(concrete_request)
-            elif isinstance(payload.options, CompareAnalysisOptions):
-                result = _compare_result(concrete_request)
-            elif isinstance(payload.options, MonteCarloAnalysisOptions):
-                result = _monte_carlo_result(concrete_request)
-            else:
-                result = _exact_result(concrete_request)
-        except ExactAnalysisError as error:
-            error_detail = APIErrorDetail(code=error.code, message=error.message)
+        validation = validate_table_state(build_table_state(scenario.state))
+        if not validation.valid:
+            issue = validation.errors[0]
+            error_detail = APIErrorDetail(
+                code=issue.code, message=issue.message, field=issue.field
+            )
             if isinstance(payload.options, ExactActionForecastOptions):
                 action_forecast_results.append(
                     ExactActionForecastScenarioResponse(
                         assumptions=assumptions,
-                        result=_action_forecast_result(concrete_request),
+                        status="invalid",
+                        error=error_detail,
                     )
                 )
             elif isinstance(payload.options, CompareAnalysisOptions):
@@ -413,6 +716,53 @@ def analyze_exact(
                     ExactScenarioResponse(
                         assumptions=assumptions,
                         status="invalid",
+                        error=error_detail,
+                    )
+                )
+            continue
+        try:
+            if isinstance(payload.options, ExactActionForecastOptions):
+                result = _action_forecast_result(concrete_request)
+            elif isinstance(payload.options, CompareAnalysisOptions):
+                result = _compare_result(concrete_request)
+            elif isinstance(payload.options, MonteCarloAnalysisOptions):
+                result = _monte_carlo_result(concrete_request)
+            else:
+                result = _exact_result(concrete_request)
+        except ExactAnalysisError as error:
+            error_detail = APIErrorDetail(code=error.code, message=error.message)
+            scenario_status = (
+                "unavailable" if error.code == "exact_computation_limit" else "invalid"
+            )
+            if isinstance(payload.options, ExactActionForecastOptions):
+                action_forecast_results.append(
+                    ExactActionForecastScenarioResponse(
+                        assumptions=assumptions,
+                        status=scenario_status,
+                        error=error_detail,
+                    )
+                )
+            elif isinstance(payload.options, CompareAnalysisOptions):
+                compare_results.append(
+                    CompareScenarioResponse(
+                        assumptions=assumptions,
+                        status="invalid",
+                        error=error_detail,
+                    )
+                )
+            elif isinstance(payload.options, MonteCarloAnalysisOptions):
+                monte_carlo_results.append(
+                    MonteCarloScenarioResponse(
+                        assumptions=assumptions,
+                        status="invalid",
+                        error=error_detail,
+                    )
+                )
+            else:
+                exact_results.append(
+                    ExactScenarioResponse(
+                        assumptions=assumptions,
+                        status=scenario_status,
                         error=error_detail,
                     )
                 )
@@ -452,6 +802,11 @@ def analyze_exact(
         return ExactActionForecastScenarioAnalysisResponse(
             model_uncertainty=list(plan.uncertainty),
             scenarios=action_forecast_results,
+            deck_count_summaries=(
+                _action_deck_summaries(action_forecast_results)
+                if "deck_count" in plan.uncertainty
+                else []
+            ),
         )
     if isinstance(payload.options, CompareAnalysisOptions):
         return CompareScenarioAnalysisResponse(
@@ -464,5 +819,11 @@ def analyze_exact(
             scenarios=monte_carlo_results,
         )
     return ExactScenarioAnalysisResponse(
-        model_uncertainty=list(plan.uncertainty), scenarios=exact_results
+        model_uncertainty=list(plan.uncertainty),
+        scenarios=exact_results,
+        deck_count_summaries=(
+            _exact_deck_summaries(exact_results)
+            if "deck_count" in plan.uncertainty
+            else []
+        ),
     )

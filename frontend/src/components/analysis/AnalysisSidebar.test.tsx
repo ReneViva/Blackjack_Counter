@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ResearchDefinition } from "../../api/research";
@@ -94,6 +94,96 @@ function forecastResponse(
   } as Response;
 }
 
+async function forecastPayload(standWin: number, hitWin: number) {
+  return forecastResponse(standWin, hitWin).json();
+}
+
+function unknownExactResponse(): Response {
+  const scenarios = Array.from({ length: 8 }, (_, index) => ({
+    assumptions: { decks: index + 1, dealer_soft_17: "stand" },
+    status: index === 0 ? "invalid" : "complete",
+    result: index === 0 ? null : {
+      method: "exact",
+      state_summary: { cards_remaining: 52 * (index + 1) - 4, known_cards: 4, hidden_cards: 0 },
+      outcomes: { win: .42, push: .08, loss: .5 },
+      metadata: { states_evaluated: 10, cache_hits: 2, cache_misses: 8, runtime_ms: 1, hidden_states_evaluated: 0, hidden_weight_mass: 1 },
+    },
+    error: index === 0 ? { code: "exact_card_multiplicity_exceeded", message: "Observed card multiplicity is impossible for one deck.", field: "cards" } : null,
+  }));
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      method: "exact",
+      model_uncertainty: ["deck_count"],
+      aggregation: "none",
+      scenarios,
+      deck_count_summaries: [{
+        method: "uniform_valid_deck_count_mean",
+        assumption: "equal_weight_valid_deck_counts",
+        dealer_soft_17: "stand",
+        status: "available",
+        candidate_deck_counts: [1, 2, 3, 4, 5, 6, 7, 8],
+        included_deck_counts: [2, 3, 4, 5, 6, 7, 8],
+        excluded_deck_counts: [{ deck_count: 1, code: "exact_card_multiplicity_exceeded", message: "Observed card multiplicity is impossible for one deck." }],
+        outcomes: { win: .42, push: .08, loss: .5 },
+        ranges: { win: { minimum: .4, maximum: .44 }, push: { minimum: .07, maximum: .09 }, loss: { minimum: .49, maximum: .51 } },
+        error: null,
+      }],
+    }),
+  } as Response;
+}
+
+function unknownForecastResponse(): Response {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => {
+      const direct = await forecastPayload(.41, .43) as Record<string, any>;
+      const scenarios = Array.from({ length: 8 }, (_, index) => ({
+        assumptions: { decks: index + 1, dealer_soft_17: "stand" },
+        status: "complete",
+        result: direct,
+        error: null,
+      }));
+      const outcome = (contract: string, win: number) => ({
+        contract,
+        status: "available",
+        outcomes: { win, push: .1, loss: .9 - win },
+        ranges: { win: { minimum: win - .02, maximum: win + .02 }, push: { minimum: .09, maximum: .11 }, loss: { minimum: .9 - win - .02, maximum: .9 - win + .02 } },
+        terminal: null,
+        child_hand_1: null,
+        child_hand_2: null,
+        error: null,
+      });
+      const child = { outcomes: { win: .3, push: .2, loss: .5 }, ranges: { win: { minimum: .28, maximum: .32 }, push: { minimum: .18, maximum: .22 }, loss: { minimum: .48, maximum: .52 } } };
+      return {
+        method: "exact_action_forecast",
+        model_uncertainty: ["deck_count"],
+        aggregation: "none",
+        scenarios,
+        deck_count_summaries: [{
+          method: "uniform_valid_deck_count_mean",
+          assumption: "equal_weight_valid_deck_counts",
+          dealer_soft_17: "stand",
+          status: "available",
+          candidate_deck_counts: [1, 2, 3, 4, 5, 6, 7, 8],
+          included_deck_counts: [1, 2, 3, 4, 5, 6, 7, 8],
+          excluded_deck_counts: [],
+          error: null,
+          action_forecasts: {
+            stand_now: outcome("stand_now", .41),
+            hit_once_then_stand: outcome("hit_once_then_stand", .43),
+            double_one_card_then_stand: outcome("double_one_card_then_stand", .43),
+            surrender_now: { contract: "surrender_now", status: "available", outcomes: null, ranges: null, terminal: "surrendered", child_hand_1: null, child_hand_2: null, error: null },
+            split_one_card_each_then_stand: { contract: "split_one_card_each_then_stand", status: "available", outcomes: null, ranges: null, terminal: null, child_hand_1: child, child_hand_2: child, error: null },
+          },
+        }],
+      };
+    },
+  } as Response;
+}
+
 function unavailableExtendedForecastResponse(): Response {
   const base = forecastResponse(.4, .2);
   return {
@@ -176,6 +266,17 @@ function startedState(): SessionState {
   state = gameReducer(state, { type: "DEAL_KNOWN_CARD", target: { kind: "player", seat: 4 }, card: { kind: "known", rank: "8", suit: "hearts" } });
   state = gameReducer(state, { type: "DEAL_KNOWN_CARD", target: { kind: "player", seat: 4 }, card: { kind: "known", rank: "6", suit: "spades" } });
   return gameReducer(state, { type: "DEAL_KNOWN_CARD", target: { kind: "dealer" }, card: { kind: "known", rank: "10", suit: "diamonds" } });
+}
+
+function unknownDeckState(): SessionState {
+  const current = startedState();
+  return {
+    ...current,
+    configuration: {
+      ...current.configuration,
+      rules: { ...current.configuration.rules, decks: null },
+    },
+  };
 }
 
 afterEach(() => {
@@ -293,6 +394,53 @@ describe("automatic analysis sidebar", () => {
     expect(screen.getByLabelText("Split one card to each hand, then stand forecast")).toHaveTextContent(
       "Unavailable. Splitting requires two known cards of the same exact rank.",
     );
+  });
+
+  it("renders compact unknown-deck exact and action summaries with accessible scenarios", async () => {
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      if (!url.endsWith("/analyze")) return researchResponse(0);
+      const body = JSON.parse(init.body as string);
+      return body.options.method === "exact_action_forecast"
+        ? unknownForecastResponse()
+        : unknownExactResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <AnalysisSidebar
+        activeTarget={{ kind: "player-hand", seat: 4, handId: "seat-4-hand-1" }}
+        state={unknownDeckState()}
+      />,
+    );
+
+    const exactSummary = await screen.findByLabelText("STAND uniform deck-count summary", {}, { timeout: 1500 });
+    expect(exactSummary).toHaveTextContent("Equal-weight assumption across valid deck counts");
+    expect(exactSummary).toHaveTextContent("Valid deck scenarios: 7 / 8");
+    expect(exactSummary).toHaveTextContent("Included: 2, 3, 4, 5, 6, 7, 8");
+    expect(exactSummary).toHaveTextContent("1 deck excluded — Observed card multiplicity is impossible");
+    expect(exactSummary).toHaveTextContent("Win42.0%Model range 40.0%–44.0%");
+
+    const exactDisclosure = within(exactSummary).getByText("Show deck scenarios");
+    expect(exactDisclosure.parentElement).not.toHaveAttribute("open");
+    fireEvent.click(exactDisclosure);
+    expect(exactDisclosure.parentElement).toHaveAttribute("open");
+    expect(within(exactSummary).getByRole("heading", { name: "8 decks · Exact finite-shoe" })).toBeVisible();
+    fireEvent.click(exactDisclosure);
+    expect(exactDisclosure.parentElement).not.toHaveAttribute("open");
+
+    const actionSummary = await screen.findByLabelText("STAND action forecast deck-count summary", {}, { timeout: 1500 });
+    expect(within(actionSummary).getByLabelText("Stand now uniform deck-count summary")).toHaveTextContent("41.0%");
+    expect(within(actionSummary).getByLabelText("Hit once, then stand uniform deck-count summary")).toHaveTextContent("43.0%");
+    expect(within(actionSummary).getByLabelText("Double — one card, then stand uniform deck-count summary")).toHaveTextContent("43.0%");
+    const surrender = within(actionSummary).getByLabelText("Surrender uniform deck-count summary");
+    expect(surrender).toHaveTextContent("Terminal outcomeSurrendered");
+    expect(surrender).toHaveTextContent("No probability mean is assigned");
+    expect(within(surrender).queryByText(/Win|Push|Loss/)).not.toBeInTheDocument();
+    const split = within(actionSummary).getByLabelText("Split uniform deck-count summary");
+    expect(within(split).getByRole("heading", { name: "Child Hand 1" })).toBeVisible();
+    expect(within(split).getByRole("heading", { name: "Child Hand 2" })).toBeVisible();
+    expect(split).not.toHaveTextContent(/overall|combined/i);
+    expect(actionSummary).not.toHaveTextContent(/confidence|recommended|best|optimal|ranking/i);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("does not let an older hand forecast overwrite the newly selected split hand", async () => {

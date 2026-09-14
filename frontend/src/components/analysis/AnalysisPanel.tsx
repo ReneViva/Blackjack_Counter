@@ -11,6 +11,7 @@ import {
   type OutcomeProbabilities,
   type ScenarioAnalysisResponse,
   type SingleAnalysisResponse,
+  type UniformDeckCountSummary,
 } from "../../api/analysis";
 import type { SessionState } from "../../state/gameReducer";
 
@@ -49,8 +50,31 @@ function SingleResult({ result }: { result: SingleAnalysisResponse }) {
   return <CompareOutcomes result={result} />;
 }
 
+function ModelRanges({ summary }: { summary: UniformDeckCountSummary }) {
+  if (!summary.ranges) return null;
+  return <dl className="model-range-grid">{OUTCOMES.map((outcome) => <div key={outcome}><dt>{title(outcome)} model range</dt><dd>{percentage(summary.ranges![outcome].minimum)}–{percentage(summary.ranges![outcome].maximum)}</dd></div>)}</dl>;
+}
+
+function ScenarioCards({ result, rule }: { result: ScenarioAnalysisResponse; rule?: "hit" | "stand" }) {
+  const scenarios = rule === undefined ? result.scenarios : result.scenarios.filter((scenario) => scenario.assumptions.dealer_soft_17 === rule);
+  return <div className="scenario-list">{scenarios.map((scenario) => <article key={`${scenario.assumptions.decks}-${scenario.assumptions.dealer_soft_17}`}><h3>{scenario.assumptions.decks} deck{scenario.assumptions.decks === 1 ? "" : "s"} · dealer {scenario.assumptions.dealer_soft_17 === "hit" ? "hits" : "stands"} on soft 17</h3>{scenario.status !== "complete" || !scenario.result ? <p className="analysis-error">{scenario.status === "invalid" ? "Excluded model" : "Unavailable model"}: {scenario.error?.message}</p> : <SingleResult result={scenario.result} />}</article>)}</div>;
+}
+
+function DeckSummary({ result, summary }: { result: ScenarioAnalysisResponse; summary: UniformDeckCountSummary }) {
+  return <section className="deck-model-summary" aria-label={`${summary.dealer_soft_17.toUpperCase()} uniform deck-count summary`}>
+    <h3>{summary.dealer_soft_17.toUpperCase()} · Uniform deck-count summary</h3>
+    <p>Equal-weight assumption across valid deck counts. This is an assumption-based model summary.</p>
+    <p>Valid deck scenarios: {summary.included_deck_counts.length} / {summary.candidate_deck_counts.length} · Included: {summary.included_deck_counts.join(", ") || "none"}</p>
+    {summary.excluded_deck_counts.length > 0 && <ul className="model-exclusions">{summary.excluded_deck_counts.map((item) => <li key={item.deck_count}>{item.deck_count} deck{item.deck_count === 1 ? "" : "s"} excluded — {item.message}</li>)}</ul>}
+    {summary.status === "available" && summary.outcomes ? <><ExactOutcomes outcomes={summary.outcomes} /><ModelRanges summary={summary} /><p>Range across valid deck-count models.</p></> : <p className="analysis-error">Summary unavailable: {summary.error?.message}</p>}
+    <details><summary>Show deck scenarios</summary><ScenarioCards result={result} rule={summary.dealer_soft_17} /></details>
+  </section>;
+}
+
 function ScenarioResults({ result }: { result: ScenarioAnalysisResponse }) {
-  return <div className="scenario-list"><p>Model uncertainty is shown as separate scenarios; no averaging is applied.</p>{result.scenarios.map((scenario) => <article key={`${scenario.assumptions.decks}-${scenario.assumptions.dealer_soft_17}`}><h3>{scenario.assumptions.decks} deck{scenario.assumptions.decks === 1 ? "" : "s"} · dealer {scenario.assumptions.dealer_soft_17 === "hit" ? "hits" : "stands"} on soft 17</h3>{scenario.status === "invalid" || !scenario.result ? <p className="analysis-error">Invalid scenario: {scenario.error?.message}</p> : <SingleResult result={scenario.result} />}</article>)}</div>;
+  const summaries = result.deck_count_summaries ?? [];
+  if (summaries.length > 0) return <div className="deck-summary-list"><p>Individual scenarios remain exact conditional finite-shoe results; summaries are separate from unaggregated scenario output.</p>{summaries.map((summary) => <DeckSummary key={summary.dealer_soft_17} result={result} summary={summary} />)}</div>;
+  return <div><p>Model uncertainty is shown as separate unaggregated scenarios.</p><details><summary>Show model scenarios</summary><ScenarioCards result={result} /></details></div>;
 }
 
 function isScenarioResult(result: AnalysisResponse): result is ScenarioAnalysisResponse { return "scenarios" in result; }

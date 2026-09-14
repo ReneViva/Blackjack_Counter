@@ -204,11 +204,107 @@ class ScenarioAssumptionsResponse(BaseModel):
     dealer_soft_17: DealerSoft17
 
 
+class ProbabilityRangeResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    minimum: float
+    maximum: float
+
+
+class OutcomeRangesResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    win: ProbabilityRangeResponse
+    push: ProbabilityRangeResponse
+    loss: ProbabilityRangeResponse
+
+
+class ExcludedDeckCountResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    deck_count: int
+    code: str
+    message: str
+
+
+class OutcomeModelSummaryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outcomes: OutcomeProbabilities
+    ranges: OutcomeRangesResponse
+
+
+class UniformDeckCountSummaryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    method: Literal["uniform_valid_deck_count_mean"] = (
+        "uniform_valid_deck_count_mean"
+    )
+    assumption: Literal["equal_weight_valid_deck_counts"] = (
+        "equal_weight_valid_deck_counts"
+    )
+    dealer_soft_17: DealerSoft17
+    status: Literal["available", "unavailable"]
+    candidate_deck_counts: list[int]
+    included_deck_counts: list[int]
+    excluded_deck_counts: list[ExcludedDeckCountResponse]
+    outcomes: OutcomeProbabilities | None = None
+    ranges: OutcomeRangesResponse | None = None
+    error: APIErrorDetail | None = None
+
+
+class UniformActionSummaryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract: Literal[
+        "stand_now",
+        "hit_once_then_stand",
+        "double_one_card_then_stand",
+        "surrender_now",
+        "split_one_card_each_then_stand",
+    ]
+    status: Literal["available", "unavailable"]
+    outcomes: OutcomeProbabilities | None = None
+    ranges: OutcomeRangesResponse | None = None
+    terminal: Literal["surrendered"] | None = None
+    child_hand_1: OutcomeModelSummaryResponse | None = None
+    child_hand_2: OutcomeModelSummaryResponse | None = None
+    error: APIErrorDetail | None = None
+
+
+class UniformActionForecastsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    stand_now: UniformActionSummaryResponse
+    hit_once_then_stand: UniformActionSummaryResponse
+    double_one_card_then_stand: UniformActionSummaryResponse
+    surrender_now: UniformActionSummaryResponse
+    split_one_card_each_then_stand: UniformActionSummaryResponse
+
+
+class UniformActionDeckCountSummaryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    method: Literal["uniform_valid_deck_count_mean"] = (
+        "uniform_valid_deck_count_mean"
+    )
+    assumption: Literal["equal_weight_valid_deck_counts"] = (
+        "equal_weight_valid_deck_counts"
+    )
+    dealer_soft_17: DealerSoft17
+    status: Literal["available", "unavailable"]
+    candidate_deck_counts: list[int]
+    included_deck_counts: list[int]
+    excluded_deck_counts: list[ExcludedDeckCountResponse]
+    action_forecasts: UniformActionForecastsResponse | None = None
+    error: APIErrorDetail | None = None
+
+
 class ExactScenarioResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     assumptions: ScenarioAssumptionsResponse
-    status: Literal["complete", "invalid"]
+    status: Literal["complete", "invalid", "unavailable"]
     result: ExactAnalysisResponse | None = None
     error: APIErrorDetail | None = None
 
@@ -219,15 +315,21 @@ class ExactScenarioAnalysisResponse(BaseModel):
     method: Literal["exact"] = "exact"
     model_uncertainty: list[Literal["deck_count", "dealer_soft_17"]]
     aggregation: Literal["none"] = "none"
+    resource_limit_scope: Literal["per_scenario"] = "per_scenario"
+    exact_state_limit_per_scenario: int = 2_000_000
     scenarios: list[ExactScenarioResponse]
+    deck_count_summaries: list[UniformDeckCountSummaryResponse] = Field(
+        default_factory=list
+    )
 
 
 class ExactActionForecastScenarioResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     assumptions: ScenarioAssumptionsResponse
-    status: Literal["complete"] = "complete"
-    result: ExactActionForecastResponse
+    status: Literal["complete", "invalid", "unavailable"] = "complete"
+    result: ExactActionForecastResponse | None = None
+    error: APIErrorDetail | None = None
 
 
 class ExactActionForecastScenarioAnalysisResponse(BaseModel):
@@ -236,7 +338,12 @@ class ExactActionForecastScenarioAnalysisResponse(BaseModel):
     method: Literal["exact_action_forecast"] = "exact_action_forecast"
     model_uncertainty: list[Literal["deck_count", "dealer_soft_17"]]
     aggregation: Literal["none"] = "none"
+    resource_limit_scope: Literal["per_scenario"] = "per_scenario"
+    exact_state_limit_per_scenario: int = 2_000_000
     scenarios: list[ExactActionForecastScenarioResponse]
+    deck_count_summaries: list[UniformActionDeckCountSummaryResponse] = Field(
+        default_factory=list
+    )
 
 
 class MonteCarloScenarioResponse(BaseModel):
