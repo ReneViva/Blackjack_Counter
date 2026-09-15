@@ -182,7 +182,7 @@ def test_unavailable_exact_result_is_retained(monkeypatch) -> None:
         case.exact_reference.error_code == "exact_computation_limit"
         for case in experiment.cases
     )
-    assert all(len(case.research_results) == 3 for case in experiment.cases)
+    assert all(len(case.research_results) == 4 for case in experiment.cases)
 
 
 def test_unknown_observation_rejects_ambiguous_base_composition() -> None:

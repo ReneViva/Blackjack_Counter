@@ -21,6 +21,7 @@ function jsonResponse(payload: unknown): Response {
 }
 
 const definitions: readonly ResearchDefinition[] = [
+  ["hi_lo", "Hi-Lo"],
   ["wong_halves", "Wong Halves"],
   ["zen_count", "Zen Count"],
   ["omega_ii", "Omega II"],
@@ -30,6 +31,7 @@ const definitions: readonly ResearchDefinition[] = [
   balanced: true,
   level: 2,
   ace_classification: "ace_neutral",
+  canonical_tags: [],
   source: {
     source_id: "approved-source",
     title: "Approved Counting Systems",
@@ -104,6 +106,11 @@ function persistedSession(): SessionState {
     target: { kind: "dealer" },
     card: { kind: "known", rank: "10", suit: "diamonds" },
   });
+  state = gameReducer(state, {
+    type: "DEAL_VALUE_CARD",
+    target: { kind: "player", seat: 4 },
+    card: { kind: "value", value: "10" },
+  });
   return gameReducer(state, {
     type: "DEAL_UNKNOWN_CARD",
     target: { kind: "dealer" },
@@ -132,6 +139,7 @@ describe("application session persistence", () => {
     expect(screen.getByRole("button", { name: /Seat 4, occupied, primary hand/ })).toBeVisible();
     expect(within(screen.getByLabelText("Seat 4 observed cards")).getByLabelText("Eight of hearts")).toBeVisible();
     expect(within(screen.getByLabelText("Seat 4 observed cards")).getByLabelText("Six of spades")).toBeVisible();
+    expect(within(screen.getByLabelText("Seat 4 observed cards")).getByLabelText("10 value card")).toBeVisible();
     expect(within(screen.getByLabelText("Dealer observed cards")).getByLabelText("Ten of diamonds")).toBeVisible();
     expect(within(screen.getByLabelText("Dealer observed cards")).getByLabelText("Unknown card")).toBeVisible();
     expect(screen.getByRole("button", { name: "Export Session Replay" })).toBeEnabled();

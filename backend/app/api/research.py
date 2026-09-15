@@ -42,6 +42,7 @@ from app.schemas import (
     ResearchMetricResponse,
     ResearchScoreResponse,
     ResearchSourceResponse,
+    ResearchTagResponse,
     ScenarioAssumptionsResponse,
     UniformDeckCountSummaryResponse,
 )
@@ -100,6 +101,14 @@ def _definition_response(definition_id: str) -> ResearchDefinitionResponse:
         balanced=definition.balanced,
         level=definition.level,
         ace_classification=definition.ace_classification.value,
+        canonical_tags=[
+            ResearchTagResponse(
+                card_value=rank,
+                tag_fraction=str(tag),
+                tag_decimal=float(tag),
+            )
+            for rank, tag in definition.tags
+        ],
         source=_source_response(definition.identifier),
         published_metrics=PublishedResearchMetricsResponse(
             pe=float(metrics.playing_efficiency),

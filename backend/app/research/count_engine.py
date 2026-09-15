@@ -2,9 +2,30 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from fractions import Fraction
 
-from app.domain import Card, ObservedCard, Rank, UnknownCard
+from app.domain import (
+    BlackjackValueClass,
+    Card,
+    ObservedCard,
+    Rank,
+    UnknownCard,
+    ValueOnlyCard,
+)
 
 from .definitions import AceClassification, ResearchDefinition
+
+
+_VALUE_CLASS_RANK = {
+    BlackjackValueClass.ACE: Rank.ACE,
+    BlackjackValueClass.TWO: Rank.TWO,
+    BlackjackValueClass.THREE: Rank.THREE,
+    BlackjackValueClass.FOUR: Rank.FOUR,
+    BlackjackValueClass.FIVE: Rank.FIVE,
+    BlackjackValueClass.SIX: Rank.SIX,
+    BlackjackValueClass.SEVEN: Rank.SEVEN,
+    BlackjackValueClass.EIGHT: Rank.EIGHT,
+    BlackjackValueClass.NINE: Rank.NINE,
+    BlackjackValueClass.TEN: Rank.TEN,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,18 +105,25 @@ def score_observations(
     include_ace_information: bool = False,
 ) -> ResearchScore:
     observation_snapshot = tuple(observations)
-    if not all(isinstance(card, (Card, UnknownCard)) for card in observation_snapshot):
+    if not all(
+        isinstance(card, (Card, ValueOnlyCard, UnknownCard))
+        for card in observation_snapshot
+    ):
         raise TypeError("observations must contain only observed cards")
 
-    known_cards = tuple(
-        card for card in observation_snapshot if isinstance(card, Card)
+    known_ranks = tuple(
+        card.rank
+        if isinstance(card, Card)
+        else _VALUE_CLASS_RANK[card.value]
+        for card in observation_snapshot
+        if isinstance(card, (Card, ValueOnlyCard))
     )
     unknown_count = sum(
         isinstance(card, UnknownCard) for card in observation_snapshot
     )
     known_result = score_known_ranks(
         definition,
-        (card.rank for card in known_cards),
+        known_ranks,
         deck_count=deck_count,
         include_ace_information=include_ace_information,
     )
@@ -116,7 +144,7 @@ def score_observations(
         definition_id=definition.identifier,
         source_id=definition.source.source_id,
         score=known_result.score,
-        observed_known_cards=len(known_cards),
+        observed_known_cards=len(known_ranks),
         unresolved_unknown_cards=unknown_count,
         complete=unknown_count == 0,
         ace_information=ace_information,

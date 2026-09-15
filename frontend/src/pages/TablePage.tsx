@@ -1,7 +1,9 @@
-import { useEffect, useState, type Dispatch } from "react";
+import { useCallback, useEffect, useState, type Dispatch } from "react";
 
 import AnalysisPanel from "../components/analysis/AnalysisPanel";
-import AnalysisSidebar from "../components/analysis/AnalysisSidebar";
+import AnalysisSidebar, {
+  ANALYSIS_DEBOUNCE_MS,
+} from "../components/analysis/AnalysisSidebar";
 import CardPicker from "../components/cards/CardPicker";
 import ResearchPanel from "../components/research/ResearchPanel";
 import BlackjackTable from "../components/table/BlackjackTable";
@@ -12,6 +14,7 @@ import {
   type LegalAction,
 } from "../api/playerActions";
 import type { SessionAction, TableTarget } from "../domain/events";
+import type { WorkspaceMode } from "../domain/workspace";
 import type { SessionState } from "../state/gameReducer";
 import { splitChildHandIds } from "../domain/hands";
 import { selectTableState } from "../state/selectors";
@@ -22,6 +25,7 @@ type TablePageProps = Readonly<{
 }>;
 
 export default function TablePage({ dispatch, state }: TablePageProps) {
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("normal");
   const [activeTarget, setActiveTarget] = useState<TableTarget | null>(null);
   const [analysisTarget, setAnalysisTarget] = useState<Extract<
     TableTarget,
@@ -44,6 +48,14 @@ export default function TablePage({ dispatch, state }: TablePageProps) {
   const legalityLoading = activeTarget?.kind === "player-hand" &&
     splitLegality === null;
 
+  const selectAssignmentTarget = useCallback((target: TableTarget) => {
+    setActiveTarget(target);
+    if (target.kind === "player-hand" &&
+        target.seat === state.configuration.userSeat) {
+      setAnalysisTarget(target);
+    }
+  }, [state.configuration.userSeat]);
+
   useEffect(() => {
     if (activeTarget?.kind === "player-hand" &&
         !table.playerHands[activeTarget.seat].some(
@@ -54,14 +66,21 @@ export default function TablePage({ dispatch, state }: TablePageProps) {
   }, [activeTarget, table.playerHands]);
 
   useEffect(() => {
-    if (analysisTarget && (
-      analysisTarget.seat !== state.configuration.userSeat ||
-      !table.playerHands[analysisTarget.seat].some(
-        (hand) => hand.handId === analysisTarget.handId,
-      )
-    )) {
-      setAnalysisTarget(null);
+    const userSeat = state.configuration.userSeat;
+    if (userSeat === null) {
+      if (analysisTarget !== null) setAnalysisTarget(null);
+      return;
     }
+    const userHands = table.playerHands[userSeat];
+    if (analysisTarget?.seat === userSeat && userHands.some(
+      (hand) => hand.handId === analysisTarget.handId,
+    )) return;
+    const firstHand = userHands[0];
+    setAnalysisTarget(firstHand ? {
+      kind: "player-hand",
+      seat: userSeat,
+      handId: firstHand.handId,
+    } : null);
   }, [analysisTarget, state.configuration.userSeat, table.playerHands]);
 
   useEffect(() => {
@@ -71,33 +90,43 @@ export default function TablePage({ dispatch, state }: TablePageProps) {
     }
     const controller = new AbortController();
     const target = activeTarget;
-    void getPlayerActions(state, activeTarget, controller.signal)
-      .then((actions) => setLegalityResult({
-        action: actions.split,
-        handId: target.handId,
-        seat: target.seat,
-        state,
-      }))
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        setLegalityResult({
-          action: {
-            allowed: false,
-            code: "backend_unavailable",
-            reason: "Python split eligibility is unavailable.",
-          },
+    const timeout = window.setTimeout(() => {
+      void getPlayerActions(state, target, controller.signal)
+        .then((actions) => setLegalityResult({
+          action: actions.split,
           handId: target.handId,
           seat: target.seat,
           state,
+        }))
+        .catch((error: unknown) => {
+          if (error instanceof DOMException && error.name === "AbortError") return;
+          setLegalityResult({
+            action: {
+              allowed: false,
+              code: "backend_unavailable",
+              reason: "Python split eligibility is unavailable.",
+            },
+            handId: target.handId,
+            seat: target.seat,
+            state,
+          });
         });
-      });
-    return () => controller.abort();
+    }, ANALYSIS_DEBOUNCE_MS);
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, [activeTarget, state]);
 
   return (
-    <div className="table-page">
+    <div className="table-page" data-workspace-mode={workspaceMode}>
       <section className="primary-workspace" aria-label="Blackjack probability workspace">
-        <AnalysisSidebar activeTarget={analysisTarget} state={state} />
+        <AnalysisSidebar
+          activeTarget={analysisTarget}
+          onSelectAnalysisTarget={setAnalysisTarget}
+          state={state}
+          workspaceMode={workspaceMode}
+        />
 
         <section className="table-workspace" aria-label="Blackjack table workspace">
           <BlackjackTable
@@ -116,15 +145,10 @@ export default function TablePage({ dispatch, state }: TablePageProps) {
                 setAnalysisTarget(target);
               }
             }}
-            onSelectTarget={(target) => {
-              setActiveTarget(target);
-              if (target.kind === "player-hand" &&
-                  target.seat === state.configuration.userSeat) {
-                setAnalysisTarget(target);
-              }
-            }}
+            onSelectTarget={selectAssignmentTarget}
             table={table}
             userSeat={state.configuration.userSeat}
+            workspaceMode={workspaceMode}
           />
 
           {activeTarget?.kind === "player-hand" && (
@@ -229,10 +253,16 @@ export default function TablePage({ dispatch, state }: TablePageProps) {
           onKnownCard={(target, card) =>
             dispatch({ type: "DEAL_KNOWN_CARD", target, card })
           }
+          onNavigateTarget={selectAssignmentTarget}
           onUnknownCard={(target) =>
             dispatch({ type: "DEAL_UNKNOWN_CARD", target })
           }
+          onValueCard={(target, card) =>
+            dispatch({ type: "DEAL_VALUE_CARD", target, card })
+          }
+          onWorkspaceModeChange={setWorkspaceMode}
           table={table}
+          workspaceMode={workspaceMode}
         />
       </section>
 

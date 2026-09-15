@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -39,6 +41,26 @@ def exact_micro_state() -> dict[str, object]:
 
 def request_for(state: dict[str, object]) -> dict[str, object]:
     return {"state": state, "options": {"method": "exact"}}
+
+
+def value_equivalent_state(state: dict[str, object]) -> dict[str, object]:
+    converted = deepcopy(state)
+
+    def as_value(card: dict[str, str]) -> dict[str, str]:
+        if card["kind"] != "known":
+            return card
+        value = "10" if card["rank"] in ("10", "J", "Q", "K") else card["rank"]
+        return {"kind": "value", "value": value}
+
+    converted["dealer"]["cards"] = [  # type: ignore[index]
+        as_value(card) for card in converted["dealer"]["cards"]  # type: ignore[index]
+    ]
+    for player in converted["players"]:  # type: ignore[index]
+        player["cards"] = [as_value(card) for card in player["cards"]]
+    converted["discarded_cards"] = [
+        as_value(card) for card in converted["discarded_cards"]  # type: ignore[index]
+    ]
+    return converted
 
 
 def test_exact_analysis_returns_hand_calculated_known_state_result() -> None:
@@ -140,3 +162,18 @@ def test_health_contract_remains_unchanged() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "service": "blackjack-analysis-api"}
+
+
+def test_value_only_state_matches_exact_blackjack_value_composition() -> None:
+    exact = client.post(
+        "/api/analyze", json=request_for(exact_micro_state())
+    ).json()
+    pro_state = value_equivalent_state(exact_micro_state())
+    first = client.post("/api/analyze", json=request_for(pro_state)).json()
+    second = client.post("/api/analyze", json=request_for(pro_state)).json()
+
+    assert first["outcomes"] == exact["outcomes"]
+    assert first["state_summary"] == exact["state_summary"]
+    assert sum(first["outcomes"].values()) == 1.0
+    assert first["outcomes"] == second["outcomes"]
+    assert first["metadata"]["states_evaluated"] == second["metadata"]["states_evaluated"]

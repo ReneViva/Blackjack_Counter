@@ -22,6 +22,15 @@ export type ExactAnalysisResponse = Readonly<{
   }>;
 }>;
 
+export type ExactHandSummary = Readonly<{
+  target: Readonly<{ seat: number; hand_id: string }>;
+  status: "complete" | "unavailable";
+  state_summary: StateSummary | null;
+  outcomes: OutcomeProbabilities | null;
+  metadata: ExactAnalysisResponse["metadata"] | null;
+  error: ErrorDetail | null;
+}>;
+
 export type EstimatedOutcome = Readonly<{ estimate: number; ci_low: number; ci_high: number }>;
 export type MonteCarloAnalysisResponse = Readonly<{
   method: "monte_carlo";
@@ -143,6 +152,32 @@ export type ExactActionForecastScenarioAnalysisResponse = Readonly<{
   }>[];
   deck_count_summaries: readonly UniformActionDeckCountSummary[];
 }>;
+export type UniformHandDeckCountSummary = UniformDeckCountSummary & Readonly<{
+  target: Readonly<{ seat: number; hand_id: string }>;
+}>;
+export type ExactHandSummariesResponse = Readonly<{
+  method: "exact_hand_summaries";
+  target: Readonly<{ seat: number; hand_id: string }>;
+  hands: readonly ExactHandSummary[];
+}>;
+export type ExactHandSummariesScenarioAnalysisResponse = Readonly<{
+  method: "exact_hand_summaries";
+  target: Readonly<{ seat: number; hand_id: string }>;
+  model_uncertainty: readonly ("deck_count" | "dealer_soft_17")[];
+  aggregation: "none";
+  resource_limit_scope: "per_scenario";
+  exact_state_limit_per_scenario: number;
+  scenarios: readonly Readonly<{
+    assumptions: Readonly<{ decks: number; dealer_soft_17: "hit" | "stand" }>;
+    status: "complete" | "invalid" | "unavailable";
+    result: ExactHandSummariesResponse | null;
+    error: ErrorDetail | null;
+  }>[];
+  deck_count_summaries: readonly UniformHandDeckCountSummary[];
+}>;
+export type HandSummariesResponse =
+  | ExactHandSummariesResponse
+  | ExactHandSummariesScenarioAnalysisResponse;
 export type ActionForecastResponse =
   | ExactActionForecastResponse
   | ExactActionForecastScenarioAnalysisResponse;
@@ -209,6 +244,13 @@ function isActionForecastResponse(value: unknown): value is ActionForecastRespon
       Array.isArray(candidate.scenarios));
 }
 
+function isHandSummariesResponse(value: unknown): value is HandSummariesResponse {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as { method?: unknown; hands?: unknown; scenarios?: unknown };
+  return candidate.method === "exact_hand_summaries" &&
+    (Array.isArray(candidate.hands) || Array.isArray(candidate.scenarios));
+}
+
 export async function analyze(state: SessionState, options: AnalysisOptions, signal?: AbortSignal, analysisTarget: TableTarget | null = null): Promise<AnalysisResponse> {
   const response = await fetch(`${getApiBaseUrl()}/analyze`, {
     method: "POST",
@@ -227,6 +269,37 @@ export async function analyze(state: SessionState, options: AnalysisOptions, sig
 
 export function analyzeExact(state: SessionState, signal?: AbortSignal, analysisTarget: TableTarget | null = null): Promise<AnalysisResponse> {
   return analyze(state, { method: "exact" }, signal, analysisTarget);
+}
+
+export async function analyzeHandSummaries(
+  state: SessionState,
+  target: Extract<TableTarget, { kind: "player-hand" }>,
+  signal?: AbortSignal,
+): Promise<HandSummariesResponse> {
+  const response = await fetch(`${getApiBaseUrl()}/analyze`, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({
+      state: toTableStatePayload(state, target),
+      options: {
+        method: "exact_hand_summaries",
+        target: { seat: target.seat, hand_id: target.handId },
+      },
+    }),
+    signal,
+  });
+  const payload: unknown = await response.json();
+  if (!response.ok) {
+    if (isErrorResponse(payload)) throw new AnalysisApiError(payload.error.code, payload.error.message);
+    throw new AnalysisApiError("analysis_request_failed", `Analysis failed with HTTP ${response.status}.`);
+  }
+  if (!isHandSummariesResponse(payload)) {
+    throw new AnalysisApiError(
+      "invalid_analysis_response",
+      "Hand summary response did not match the expected contract.",
+    );
+  }
+  return payload;
 }
 
 export async function analyzeActionForecast(

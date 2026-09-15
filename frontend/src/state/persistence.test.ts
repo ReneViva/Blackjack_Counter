@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { parseSessionReplay, serializeSessionReplay } from "../replay/sessionReplay";
+import { toTableStatePayload } from "../api/tableState";
+import { splitChildHandIds } from "../domain/hands";
 import { gameReducer, type SessionState } from "./gameReducer";
 import { createInitialState } from "./initialState";
 import {
@@ -56,6 +58,46 @@ function activeSession(): SessionState {
   });
 }
 
+function valueSession(): SessionState {
+  let state = activeSession();
+  state = gameReducer(state, {
+    type: "DEAL_VALUE_CARD",
+    target: { kind: "player", seat: 4 },
+    card: { kind: "value", value: "A" },
+  });
+  return gameReducer(state, {
+    type: "DEAL_VALUE_CARD",
+    target: { kind: "dealer" },
+    card: { kind: "value", value: "10" },
+  });
+}
+
+function splitValueSession(): SessionState {
+  let state = gameReducer(createInitialState(), { type: "ADD_PLAYER", seat: 4 });
+  for (const suit of ["hearts", "clubs"] as const) {
+    state = gameReducer(state, {
+      type: "DEAL_KNOWN_CARD",
+      target: { kind: "player", seat: 4 },
+      card: { kind: "known", rank: "8", suit },
+    });
+  }
+  const [leftHandId, rightHandId] = splitChildHandIds("seat-4-hand-1");
+  state = gameReducer(state, {
+    type: "SPLIT_PLAYER_HAND",
+    seat: 4,
+    handId: "seat-4-hand-1",
+    leftHandId,
+    rightHandId,
+    splitDepth: 1,
+    fromSplitAces: false,
+  });
+  return gameReducer(state, {
+    type: "DEAL_VALUE_CARD",
+    target: { kind: "player-hand", seat: 4, handId: rightHandId },
+    card: { kind: "value", value: "10" },
+  });
+}
+
 function expectPersistenceCode(action: () => unknown, code: string): void {
   try {
     action();
@@ -102,6 +144,48 @@ describe("versioned session persistence", () => {
     expect(selectTableState(restored).dealerCards.at(-1)).toEqual({ kind: "unknown" });
   });
 
+  it("round-trips mixed exact, value-only, and unknown chronology without precision loss", () => {
+    const original = valueSession();
+    const serialized = serializePersistedSession(original);
+    const restored = parsePersistedSession(serialized);
+
+    expect(restored).toEqual(original);
+    expect(selectTableState(restored).playerHands[4][0].cards.at(-1)).toEqual({
+      kind: "value",
+      value: "A",
+    });
+    expect(selectTableState(restored).dealerCards.at(-1)).toEqual({
+      kind: "value",
+      value: "10",
+    });
+    expect(toTableStatePayload(restored)).toEqual(toTableStatePayload(original));
+    expect(JSON.parse(serialized)).not.toHaveProperty("analysis");
+  });
+
+  it("reads historical storage versions 1 and 2", () => {
+    const current = createPersistedSession(activeSession());
+    for (const version of [1, 2]) {
+      expect(parsePersistedSession(JSON.stringify({ ...current, version })))
+        .toEqual(activeSession());
+    }
+  });
+
+  it("preserves split hand identity and value-only targeting across reload", () => {
+    const original = splitValueSession();
+    const restored = parsePersistedSession(serializePersistedSession(original));
+
+    expect(restored).toEqual(original);
+    expect(selectTableState(restored).playerHands[4][1]).toMatchObject({
+      handId: "seat-4-hand-1-2",
+      parentHandId: "seat-4-hand-1",
+      splitDepth: 1,
+      cards: [
+        { kind: "known", rank: "8", suit: "clubs" },
+        { kind: "value", value: "10" },
+      ],
+    });
+  });
+
   it("preserves completed-round, discard, shuffle, and undo chronology", () => {
     let state = gameReducer(activeSession(), { type: "ROUND_COMPLETE" });
     state = gameReducer(state, { type: "SHUFFLE" });
@@ -122,6 +206,9 @@ describe("versioned session persistence", () => {
 
     for (const forbidden of [
       "activeTarget",
+      "proMode",
+      "inputMode",
+      "workspaceMode",
       "analysisResponse",
       "confidenceInterval",
       "researchResponse",
@@ -171,7 +258,7 @@ describe("strict persistence parsing", () => {
       "invalid_persistence_format",
     );
     expectPersistenceCode(
-      () => parsePersistedSession(JSON.stringify({ ...envelope, version: 3 })),
+      () => parsePersistedSession(JSON.stringify({ ...envelope, version: 4 })),
       "unsupported_persistence_version",
     );
   });
@@ -205,6 +292,29 @@ describe("strict persistence parsing", () => {
     outOfOrder.session.events[1].sequence = 99;
     expectPersistenceCode(
       () => parsePersistedSession(JSON.stringify(outOfOrder)),
+      "invalid_persistence_session",
+    );
+  });
+
+  it("rejects malformed value-only chronology without coercing it to Unknown", () => {
+    const envelope = structuredClone(createPersistedSession(valueSession())) as unknown as {
+      session: { events: Array<Record<string, unknown>> };
+    };
+    const valueEvent = envelope.session.events.find((event) =>
+      event.type === "DEAL_VALUE_CARD"
+    )!;
+    valueEvent.card = { kind: "value", value: "K" };
+
+    expectPersistenceCode(
+      () => parsePersistedSession(JSON.stringify(envelope)),
+      "invalid_persistence_session",
+    );
+  });
+
+  it("rejects value-only chronology mislabeled as historical storage v2", () => {
+    const envelope = { ...createPersistedSession(valueSession()), version: 2 };
+    expectPersistenceCode(
+      () => parsePersistedSession(JSON.stringify(envelope)),
       "invalid_persistence_session",
     );
   });

@@ -151,3 +151,61 @@ def test_hidden_analysis_is_deterministic_and_does_not_mutate_input() -> None:
     assert state == original
     assert state.game_state is not None
     assert state.game_state.shoe.unknown_removed_count == 1
+
+
+def test_value_only_hidden_composition_preserves_peek_conditioning() -> None:
+    discarded = (
+        [{"kind": "value", "value": "A"}] * 3
+        + [
+            {"kind": "value", "value": str(value)}
+            for value in range(2, 9)
+            for _ in range(4)
+        ]
+        + [{"kind": "value", "value": "9"}] * 3
+        + [{"kind": "value", "value": "10"}] * 11
+    )
+    state = build_table_state(
+        TableStateSchema.model_validate(
+            {
+                "rules": {
+                    "decks": 1,
+                    "dealer_soft_17": "stand",
+                    "dealer_blackjack_check": "peek",
+                },
+                "dealer": {
+                    "cards": [
+                        {"kind": "value", "value": "A"},
+                        {"kind": "unknown"},
+                    ]
+                },
+                "players": [
+                    {
+                        "seat": 1,
+                        "is_user": True,
+                        "cards": [
+                            {"kind": "value", "value": "10"},
+                            {"kind": "value", "value": "10"},
+                        ],
+                    }
+                ],
+                "discarded_cards": discarded,
+            }
+        )
+    )
+
+    unconditional = analyze_exact_table(state)
+    conditioned_states = enumerate_hidden_states(
+        state,
+        dealer_check_result=DealerCheckResult.NO_BLACKJACK,
+    )
+    conditioned = analyze_exact_table(
+        state,
+        dealer_check_result=DealerCheckResult.NO_BLACKJACK,
+    )
+
+    assert unconditional.outcomes.loss == 0.75
+    assert unconditional.outcomes.push == 0.25
+    assert len(conditioned_states.branches) == 1
+    assert conditioned_states.evidence_probability == 0.25
+    assert conditioned.outcomes.push == 1.0
+    assert conditioned.outcomes.total == 1.0

@@ -23,6 +23,14 @@ function describeEvent(event: GameEvent): string {
             : `Player seat ${event.target.seat}`;
       return `${target} observed ${event.card.rank} of ${event.card.suit}`;
     }
+    case "DEAL_VALUE_CARD": {
+      const target = event.target.kind === "dealer"
+        ? "Dealer"
+        : event.target.kind === "player-hand"
+          ? `Player seat ${event.target.seat}, hand ${event.target.handId}`
+          : `Player seat ${event.target.seat}`;
+      return `${target} observed generic ${event.card.value}`;
+    }
     case "DEAL_UNKNOWN_CARD":
       return event.target.kind === "dealer"
         ? "Dealer observed an unknown card"

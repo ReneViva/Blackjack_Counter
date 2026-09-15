@@ -9,6 +9,7 @@ from app.domain import (
     ObservedCard,
     Rules,
     UnknownCard,
+    ValueOnlyCard,
     initial_hand_id,
 )
 from app.schemas import (
@@ -16,6 +17,7 @@ from app.schemas import (
     ObservedCardSchema,
     PlayerHandSchema,
     TableStateSchema,
+    ValueOnlyCardSchema,
 )
 
 from .shoe_builder import StateReconstructionError, build_shoe
@@ -53,6 +55,8 @@ class ReconstructedTableState:
 def build_observed_card(card: ObservedCardSchema) -> ObservedCard:
     if isinstance(card, KnownCardSchema):
         return Card(rank=card.rank, suit=card.suit)
+    if isinstance(card, ValueOnlyCardSchema):
+        return ValueOnlyCard(value=card.value)
     return UnknownCard()
 
 
@@ -88,7 +92,9 @@ def build_table_state(payload: TableStateSchema) -> ReconstructedTableState:
         + discarded_cards
     )
     known_cards = tuple(
-        card for card in all_observed_cards if isinstance(card, Card)
+        card
+        for card in all_observed_cards
+        if isinstance(card, (Card, ValueOnlyCard))
     )
     unknown_card_count = sum(
         isinstance(card, UnknownCard) for card in all_observed_cards

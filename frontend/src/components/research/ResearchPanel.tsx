@@ -192,7 +192,7 @@ export default function ResearchPanel({ state }: ResearchPanelProps) {
         {currentAceInformation && <section className="research-ace-auxiliary" aria-labelledby="research-ace-auxiliary-title">
           <p className="eyebrow">Auxiliary research information</p>
           <h3 id="research-ace-auxiliary-title">Ace Information</h3>
-          <p>Ace Information remains separate from Wong Halves, Zen Count, and Omega II; it is not a fourth primary system.</p>
+          <p>Ace Information remains separate from Hi-Lo, Wong Halves, Zen Count, and Omega II; it is an auxiliary feature, not a primary system.</p>
           <dl className="compact-outcomes"><div><dt>Known aces observed</dt><dd>{currentAceInformation.known_aces_observed}</dd></div><div><dt>Exact aces remaining</dt><dd>{currentAceInformation.exact_aces_remaining ?? "Unknown"}</dd></div></dl>
         </section>}
       </div>}

@@ -8,18 +8,27 @@ import {
 } from "./ResearchInterpretation";
 
 const metadata = [
+  ["hi_lo", "Hi-Lo", "0", 0, .51, .97, .76],
   ["wong_halves", "Wong Halves", "-3/2", -1.5, .56, .99, .72],
   ["zen_count", "Zen Count", "-2", -2, .63, .96, .85],
   ["omega_ii", "Omega II", "-1", -1, .67, .92, .85],
 ] as const;
+
+const ranks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"] as const;
+const hiLoValues = [-1, 1, 1, 1, 1, 1, 0, 0, 0, -1, -1, -1, -1] as const;
 
 const scores: readonly ResearchScore[] = metadata.map((item) => ({
   definition: {
     identifier: item[0] as ResearchDefinition["identifier"],
     label: item[1],
     balanced: true,
-    level: item[0] === "wong_halves" ? 3 : 2,
+    level: item[0] === "hi_lo" ? 1 : item[0] === "wong_halves" ? 3 : 2,
     ace_classification: item[0] === "omega_ii" ? "ace_neutral" : "ace_reckoned",
+    canonical_tags: ranks.map((rank, index) => ({
+      card_value: rank,
+      tag_fraction: String(item[0] === "hi_lo" ? hiLoValues[index] : 0),
+      tag_decimal: item[0] === "hi_lo" ? hiLoValues[index] : 0,
+    })),
     source: {
       source_id: "approved-counting-systems-2026-09-12",
       title: "Approved counting systems research package",
@@ -43,7 +52,7 @@ const scores: readonly ResearchScore[] = metadata.map((item) => ({
 }));
 
 describe("research-system interpretation", () => {
-  it("keeps three distinct scores beside one identical exact physical reference", () => {
+  it("keeps four distinct scores beside one identical exact physical reference", () => {
     render(<>
       <ResearchSystemCards
         scores={scores}
@@ -62,7 +71,13 @@ describe("research-system interpretation", () => {
       expect(within(card).getByLabelText("Current exact physical-state probability reference")).toHaveTextContent("Win42.1%Push7.2%Loss50.7%");
       expect(card).toHaveTextContent(`not derived from the ${label} raw research score`);
     }
-    expect(screen.getByRole("table", { name: "Research-system comparison" })).toHaveTextContent("Wong Halves");
+    const comparison = screen.getByRole("table", { name: "Research-system comparison" });
+    expect(comparison).toHaveTextContent("Hi-Lo");
+    expect(comparison).toHaveTextContent("Wong Halves");
+    const hiLoCard = screen.getByRole("heading", { name: "Hi-Lo" }).closest("article") as HTMLElement;
+    expect(hiLoCard).toHaveTextContent("Canonical tags: A -1,2 +1,3 +1,4 +1,5 +1,6 +1,7 0,8 0,9 0,10 -1,J -1,Q -1,K -1");
+    expect(hiLoCard).toHaveTextContent("Balanced Level 1: a complete deck's card weights sum to zero.");
+    expect(hiLoCard).toHaveTextContent("not Win probability, Push probability, or Loss probability");
     expect(screen.getByText(/not mathematically equivalent/)).toBeVisible();
     expect(document.body).not.toHaveTextContent(/best system|winner|recommended count|hit because|stand because/i);
   });
@@ -101,10 +116,10 @@ describe("research-system interpretation", () => {
       }]}
     />);
 
-    expect(screen.getAllByText("S17 · Uniform deck-count summary")).toHaveLength(3);
-    expect(screen.getAllByText(/Equal-weight assumption across valid deck-count models/)).toHaveLength(3);
-    expect(screen.getAllByText(/1 deck excluded/)).toHaveLength(3);
-    expect(screen.getAllByText(/Win model range/)).toHaveLength(3);
+    expect(screen.getAllByText("S17 · Uniform deck-count summary")).toHaveLength(4);
+    expect(screen.getAllByText(/Equal-weight assumption across valid deck-count models/)).toHaveLength(4);
+    expect(screen.getAllByText(/1 deck excluded/)).toHaveLength(4);
+    expect(screen.getAllByText(/Win model range/)).toHaveLength(4);
     expect(document.body).not.toHaveTextContent(/confidence interval|95% CI/i);
     expect(screen.queryByText(/8 decks · Exact finite-shoe/)).not.toBeInTheDocument();
   });

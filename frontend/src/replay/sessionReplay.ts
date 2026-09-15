@@ -1,4 +1,13 @@
-import { RANKS, SUITS, type KnownCard, type Rank, type Suit } from "../domain/card";
+import {
+  BLACKJACK_VALUE_CLASSES,
+  RANKS,
+  SUITS,
+  type BlackjackValueClass,
+  type KnownCard,
+  type Rank,
+  type Suit,
+  type ValueOnlyCard,
+} from "../domain/card";
 import type { GameEvent, RecordedTableTarget, SessionAction } from "../domain/events";
 import { SEAT_NUMBERS, type SeatNumber, type SessionConfiguration } from "../domain/game";
 import { DECK_COUNTS, type DeckCount, type SessionRules } from "../domain/rules";
@@ -12,8 +21,10 @@ import { gameReducer, type SessionState } from "../state/gameReducer";
 import { createInitialState } from "../state/initialState";
 
 export const REPLAY_FORMAT = "blackjack-session-replay" as const;
-export const REPLAY_VERSION = 2 as const;
+export const REPLAY_VERSION = 3 as const;
 export const MAX_REPLAY_BYTES = 1024 * 1024;
+
+export type ReplayVersion = 1 | 2 | typeof REPLAY_VERSION;
 
 export type SessionReplayEnvelope = Readonly<{
   format: typeof REPLAY_FORMAT;
@@ -183,6 +194,16 @@ function parseKnownCard(value: unknown): KnownCard {
   return { kind: "known", rank: card.rank as Rank, suit: card.suit as Suit };
 }
 
+function parseValueOnlyCard(value: unknown): ValueOnlyCard {
+  const card = requireObject(value, "value-only card");
+  requireExactKeys(card, ["kind", "value"], "value-only card");
+  if (card.kind !== "value" ||
+      !BLACKJACK_VALUE_CLASSES.includes(card.value as BlackjackValueClass)) {
+    fail("invalid_replay_event", "Value-only card value is unsupported.");
+  }
+  return { kind: "value", value: card.value as BlackjackValueClass };
+}
+
 function parseIdentity(event: JsonObject, index: number): void {
   const expectedSequence = index + 1;
   const expectedId = `evt_${expectedSequence.toString().padStart(4, "0")}`;
@@ -195,7 +216,7 @@ function eventAction(
   value: unknown,
   index: number,
   configuration: SessionConfiguration,
-  version: 1 | 2,
+  version: ReplayVersion,
 ): SessionAction {
   const event = requireObject(value, `event ${index + 1}`);
   if (typeof event.type !== "string") {
@@ -266,6 +287,16 @@ function eventAction(
         target: parseTarget(event.target, configuration),
         card: parseKnownCard(event.card),
       };
+    case "DEAL_VALUE_CARD":
+      if (version < 3) {
+        fail("unsupported_replay_event", "DEAL_VALUE_CARD requires replay version 3.");
+      }
+      requireExactKeys(event, ["id", "sequence", "type", "target", "card"], "DEAL_VALUE_CARD event");
+      return {
+        type: "DEAL_VALUE_CARD",
+        target: parseTarget(event.target, configuration),
+        card: parseValueOnlyCard(event.card),
+      };
     case "DEAL_UNKNOWN_CARD":
       requireExactKeys(event, ["id", "sequence", "type", "target"], "DEAL_UNKNOWN_CARD event");
       return { type: "DEAL_UNKNOWN_CARD", target: parseTarget(event.target, configuration) };
@@ -318,7 +349,7 @@ export function serializeSessionReplay(state: SessionState): string {
 export function reconstructSerializedSession(
   value: unknown,
   allowEmptyChronology = false,
-  version: 1 | 2 = REPLAY_VERSION,
+  version: ReplayVersion = REPLAY_VERSION,
 ): SessionState {
   const session = requireObject(value, "serialized session");
   requireExactKeys(session, ["configuration", "events"], "serialized session");
@@ -376,10 +407,10 @@ export function parseSessionReplay(text: string): SessionState {
   if (envelope.format !== REPLAY_FORMAT) {
     fail("invalid_replay_format", `Replay format must be ${REPLAY_FORMAT}.`);
   }
-  if (envelope.version !== 1 && envelope.version !== REPLAY_VERSION) {
-    fail("unsupported_replay_version", "Only replay versions 1 and 2 are supported.");
+  if (envelope.version !== 1 && envelope.version !== 2 && envelope.version !== REPLAY_VERSION) {
+    fail("unsupported_replay_version", "Only replay versions 1, 2, and 3 are supported.");
   }
-  const version = envelope.version as 1 | 2;
+  const version = envelope.version as ReplayVersion;
   const candidate = reconstructSerializedSession(envelope.session, false, version);
   const finalState = version === 1
     ? toLegacyTableStatePayload(candidate)

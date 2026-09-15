@@ -1,4 +1,14 @@
-from app.domain import Card, DealerSoft17, GameState, Hand, Rank, Rules, Shoe, Suit
+from app.domain import (
+    BlackjackValueClass,
+    Card,
+    DealerSoft17,
+    GameState,
+    Hand,
+    Rank,
+    Rules,
+    Shoe,
+    Suit,
+)
 from app.engine import (
     ReconstructedPlayerHand,
     ReconstructedTableState,
@@ -53,6 +63,7 @@ def test_reports_exact_and_rank_multiplicity_in_deterministic_order() -> None:
     assert [issue.code for issue in first.errors] == [
         "exact_card_multiplicity_exceeded",
         "rank_multiplicity_exceeded",
+        "value_class_capacity_exceeded",
     ]
     assert state.game_state is None
 
@@ -133,3 +144,55 @@ def test_exact_card_code_uses_domain_card_identity() -> None:
     assert Card(rank=Rank.KING, suit=Suit.HEARTS) in tuple(
         card for card in state.dealer_hand.cards if isinstance(card, Card)
     )
+
+
+def test_one_deck_allows_sixteen_generic_tens_and_rejects_seventeenth() -> None:
+    sixteen = build_table_state(
+        payload(dealer_cards=[{"kind": "value", "value": "10"}] * 16)
+    )
+    seventeen = build_table_state(
+        payload(dealer_cards=[{"kind": "value", "value": "10"}] * 17)
+    )
+
+    assert validate_table_state(sixteen).valid
+    assert sixteen.game_state is not None
+    assert sixteen.game_state.shoe.total_cards == 36
+    assert [issue.code for issue in validate_table_state(seventeen).errors] == [
+        "value_class_capacity_exceeded"
+    ]
+    assert seventeen.game_state is None
+
+
+def test_mixed_exact_and_generic_ten_share_aggregate_capacity() -> None:
+    exact_tens = [
+        {"kind": "known", "rank": rank, "suit": suit}
+        for rank in ("10", "J", "Q", "K")
+        for suit in ("S", "H", "D", "C")
+    ]
+    valid = build_table_state(
+        payload(dealer_cards=[*exact_tens[:15], {"kind": "value", "value": "10"}])
+    )
+    invalid = build_table_state(
+        payload(dealer_cards=[*exact_tens, {"kind": "value", "value": "10"}])
+    )
+
+    assert validate_table_state(valid).valid
+    assert valid.game_state is not None
+    assert valid.game_state.shoe.value_count(BlackjackValueClass.TEN) == 0
+    assert [issue.code for issue in validate_table_state(invalid).errors] == [
+        "value_class_capacity_exceeded"
+    ]
+
+
+def test_exact_and_generic_aces_share_aggregate_capacity() -> None:
+    exact_aces = [
+        {"kind": "known", "rank": "A", "suit": suit}
+        for suit in ("S", "H", "D", "C")
+    ]
+    state = build_table_state(
+        payload(dealer_cards=[*exact_aces, {"kind": "value", "value": "A"}])
+    )
+
+    assert [issue.code for issue in validate_table_state(state).errors] == [
+        "value_class_capacity_exceeded"
+    ]

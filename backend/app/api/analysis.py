@@ -1,14 +1,16 @@
+from dataclasses import replace
 from time import perf_counter
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from app.domain import DealerSoft17
-from app.engine import build_table_state, validate_table_state
+from app.engine import ReconstructedTableState, build_table_state, validate_table_state
 from app.probability import (
     ExactAnalysisError,
     ExactActionForecast,
     ExactSplitActionForecast,
+    ExactTableAnalysis,
     ExactTerminalActionForecast,
     OutcomeDistribution,
     analyze_exact_action_forecasts,
@@ -32,6 +34,11 @@ from app.schemas import (
     ComparisonOutcomesResponse,
     ExactAnalysisResponse,
     ExactActionForecastOptions,
+    ExactHandSummariesOptions,
+    ExactHandSummariesResponse,
+    ExactHandSummaryResponse,
+    ExactHandSummariesScenarioAnalysisResponse,
+    ExactHandSummariesScenarioResponse,
     ExactActionForecastResponse,
     ExactActionForecastResultResponse,
     ExactSplitActionForecastResultResponse,
@@ -59,6 +66,7 @@ from app.schemas import (
     UniformActionForecastsResponse,
     UniformActionSummaryResponse,
     UniformDeckCountSummaryResponse,
+    UniformHandDeckCountSummaryResponse,
 )
 
 
@@ -98,6 +106,127 @@ def _exact_result(payload: AnalysisRequest) -> ExactAnalysisResponse:
             hidden_states_evaluated=result.hidden_states_evaluated,
             hidden_weight_mass=result.hidden_weight_mass,
         ),
+    )
+
+
+def _analysis_result_response(
+    result: ExactTableAnalysis,
+    runtime_ms: float,
+) -> tuple[AnalysisStateSummary, OutcomeProbabilities, AnalysisMetadata]:
+    return (
+        AnalysisStateSummary(
+            cards_remaining=result.cards_remaining,
+            known_cards=result.known_cards,
+            hidden_cards=result.hidden_cards,
+        ),
+        OutcomeProbabilities(
+            win=result.outcomes.win,
+            push=result.outcomes.push,
+            loss=result.outcomes.loss,
+        ),
+        AnalysisMetadata(
+            states_evaluated=result.metrics.states_evaluated,
+            cache_hits=result.metrics.cache_hits,
+            cache_misses=result.metrics.cache_misses,
+            runtime_ms=runtime_ms,
+            hidden_states_evaluated=result.hidden_states_evaluated,
+            hidden_weight_mass=result.hidden_weight_mass,
+        ),
+    )
+
+
+def _validate_summary_target(
+    state: ReconstructedTableState,
+    target_seat: int,
+    target_hand_id: str,
+) -> None:
+    matching = [
+        player
+        for player in state.players
+        if player.seat == target_seat and player.hand_id == target_hand_id
+    ]
+    if len(matching) != 1:
+        raise ExactAnalysisError(
+            "invalid_hand_target",
+            "The selected analysis hand does not belong to the specified seat.",
+        )
+
+
+def _hand_summaries_result_from_state(
+    state: ReconstructedTableState,
+    options: ExactHandSummariesOptions,
+) -> ExactHandSummariesResponse:
+    target = options.target
+    validation = validate_table_state(state)
+    if not validation.valid:
+        issue = validation.errors[0]
+        raise ExactAnalysisError(issue.code, issue.message)
+    _validate_summary_target(state, target.seat, target.hand_id)
+    hands: list[ExactHandSummaryResponse] = []
+    for player in (item for item in state.players if item.seat == target.seat):
+        hand_target = ActionForecastTargetResponse(
+            seat=player.seat, hand_id=player.hand_id
+        )
+        if len(player.hand.cards) < 2:
+            hands.append(
+                ExactHandSummaryResponse(
+                    target=hand_target,
+                    status="unavailable",
+                    error=APIErrorDetail(
+                        code="hand_not_ready",
+                        message=(
+                            "This hand requires two observed cards before exact "
+                            "outcomes can be calculated."
+                        ),
+                    ),
+                )
+            )
+            continue
+        selected_state = replace(
+            state,
+            players=tuple(
+                replace(
+                    candidate,
+                    is_user=(
+                        candidate.seat == player.seat
+                        and candidate.hand_id == player.hand_id
+                    ),
+                )
+                for candidate in state.players
+            ),
+        )
+        started = perf_counter()
+        try:
+            result = analyze_exact_table(
+                selected_state,
+                dealer_check_result=options.dealer_check_result,
+            )
+        except ExactAnalysisError as error:
+            hands.append(
+                ExactHandSummaryResponse(
+                    target=hand_target,
+                    status="unavailable",
+                    error=APIErrorDetail(code=error.code, message=error.message),
+                )
+            )
+            continue
+        state_summary, outcomes, metadata = _analysis_result_response(
+            result, (perf_counter() - started) * 1000.0
+        )
+        hands.append(
+            ExactHandSummaryResponse(
+                target=hand_target,
+                status="complete",
+                state_summary=state_summary,
+                outcomes=outcomes,
+                metadata=metadata,
+            )
+        )
+    return ExactHandSummariesResponse(
+        target=ActionForecastTargetResponse(
+            seat=target.seat, hand_id=target.hand_id
+        ),
+        hands=hands,
     )
 
 
@@ -358,6 +487,84 @@ def _exact_deck_summaries(
                 ranges=values.ranges,
             )
         )
+    return summaries
+
+
+def _hand_deck_summaries(
+    scenarios: list[ExactHandSummariesScenarioResponse],
+    ordered_targets: list[ActionForecastTargetResponse],
+) -> list[UniformHandDeckCountSummaryResponse]:
+    summaries: list[UniformHandDeckCountSummaryResponse] = []
+    rules = sorted(
+        {scenario.assumptions.dealer_soft_17 for scenario in scenarios},
+        key=lambda value: value.value,
+    )
+    for target in ordered_targets:
+        for rule in rules:
+            group = [
+                scenario
+                for scenario in scenarios
+                if scenario.assumptions.dealer_soft_17 is rule
+            ]
+            included, excluded = _deck_model_metadata(scenarios, rule)
+            base = dict(
+                target=target,
+                dealer_soft_17=rule,
+                candidate_deck_counts=list(range(1, 9)),
+                included_deck_counts=included,
+                excluded_deck_counts=excluded,
+            )
+            if not included:
+                summaries.append(
+                    UniformHandDeckCountSummaryResponse(
+                        **base,
+                        status="unavailable",
+                        error=_summary_error(
+                            "no_valid_deck_models",
+                            "No physically valid deck-count models are available.",
+                        ),
+                    )
+                )
+                continue
+            values: list[OutcomeProbabilities] = []
+            hand_error: APIErrorDetail | None = None
+            for scenario in group:
+                if scenario.status == "invalid":
+                    continue
+                hand = next(
+                    (
+                        item
+                        for item in (scenario.result.hands if scenario.result else [])
+                        if item.target == target
+                    ),
+                    None,
+                )
+                if hand is None or hand.status != "complete" or hand.outcomes is None:
+                    hand_error = hand.error if hand is not None else scenario.error
+                    break
+                values.append(hand.outcomes)
+            if hand_error is not None or len(values) != len(included):
+                summaries.append(
+                    UniformHandDeckCountSummaryResponse(
+                        **base,
+                        status="unavailable",
+                        error=hand_error
+                        or _summary_error(
+                            "deck_model_analysis_unavailable",
+                            "At least one valid deck-count model could not be evaluated within the exact resource limit.",
+                        ),
+                    )
+                )
+                continue
+            summary = _summary_values(values)
+            summaries.append(
+                UniformHandDeckCountSummaryResponse(
+                    **base,
+                    status="available",
+                    outcomes=summary.outcomes,
+                    ranges=summary.ranges,
+                )
+            )
     return summaries
 
 
@@ -635,6 +842,8 @@ def _compare_result(payload: AnalysisRequest) -> CompareAnalysisResponse:
     "/analyze",
     response_model=(
         ExactAnalysisResponse
+        | ExactHandSummariesResponse
+        | ExactHandSummariesScenarioAnalysisResponse
         | ExactActionForecastResponse
         | ExactActionForecastScenarioAnalysisResponse
         | ExactScenarioAnalysisResponse
@@ -649,6 +858,8 @@ def analyze_exact(
     payload: AnalysisRequest,
 ) -> (
     ExactAnalysisResponse
+    | ExactHandSummariesResponse
+    | ExactHandSummariesScenarioAnalysisResponse
     | ExactActionForecastResponse
     | ExactActionForecastScenarioAnalysisResponse
     | ExactScenarioAnalysisResponse
@@ -659,8 +870,23 @@ def analyze_exact(
     | JSONResponse
 ):
     plan = concrete_scenarios(payload.state)
+    summary_state: ReconstructedTableState | None = None
+    if isinstance(payload.options, ExactHandSummariesOptions):
+        target = payload.options.target
+        summary_state = build_table_state(payload.state)
+        try:
+            _validate_summary_target(
+                summary_state, target.seat, target.hand_id
+            )
+        except ExactAnalysisError as error:
+            return _error_response(error)
     if not plan.uncertainty:
         try:
+            if isinstance(payload.options, ExactHandSummariesOptions):
+                assert summary_state is not None
+                return _hand_summaries_result_from_state(
+                    summary_state, payload.options
+                )
             if isinstance(payload.options, ExactActionForecastOptions):
                 return _action_forecast_result(payload)
             if isinstance(payload.options, CompareAnalysisOptions):
@@ -672,6 +898,7 @@ def analyze_exact(
             return _error_response(error)
 
     exact_results: list[ExactScenarioResponse] = []
+    hand_summary_results: list[ExactHandSummariesScenarioResponse] = []
     action_forecast_results: list[ExactActionForecastScenarioResponse] = []
     monte_carlo_results: list[MonteCarloScenarioResponse] = []
     compare_results: list[CompareScenarioResponse] = []
@@ -681,7 +908,8 @@ def analyze_exact(
             dealer_soft_17=scenario.assumptions.dealer_soft_17,
         )
         concrete_request = payload.model_copy(update={"state": scenario.state})
-        validation = validate_table_state(build_table_state(scenario.state))
+        scenario_state = build_table_state(scenario.state)
+        validation = validate_table_state(scenario_state)
         if not validation.valid:
             issue = validation.errors[0]
             error_detail = APIErrorDetail(
@@ -690,6 +918,14 @@ def analyze_exact(
             if isinstance(payload.options, ExactActionForecastOptions):
                 action_forecast_results.append(
                     ExactActionForecastScenarioResponse(
+                        assumptions=assumptions,
+                        status="invalid",
+                        error=error_detail,
+                    )
+                )
+            elif isinstance(payload.options, ExactHandSummariesOptions):
+                hand_summary_results.append(
+                    ExactHandSummariesScenarioResponse(
                         assumptions=assumptions,
                         status="invalid",
                         error=error_detail,
@@ -723,6 +959,10 @@ def analyze_exact(
         try:
             if isinstance(payload.options, ExactActionForecastOptions):
                 result = _action_forecast_result(concrete_request)
+            elif isinstance(payload.options, ExactHandSummariesOptions):
+                result = _hand_summaries_result_from_state(
+                    scenario_state, payload.options
+                )
             elif isinstance(payload.options, CompareAnalysisOptions):
                 result = _compare_result(concrete_request)
             elif isinstance(payload.options, MonteCarloAnalysisOptions):
@@ -737,6 +977,14 @@ def analyze_exact(
             if isinstance(payload.options, ExactActionForecastOptions):
                 action_forecast_results.append(
                     ExactActionForecastScenarioResponse(
+                        assumptions=assumptions,
+                        status=scenario_status,
+                        error=error_detail,
+                    )
+                )
+            elif isinstance(payload.options, ExactHandSummariesOptions):
+                hand_summary_results.append(
+                    ExactHandSummariesScenarioResponse(
                         assumptions=assumptions,
                         status=scenario_status,
                         error=error_detail,
@@ -774,6 +1022,14 @@ def analyze_exact(
                         result=result,
                     )
                 )
+            elif isinstance(result, ExactHandSummariesResponse):
+                hand_summary_results.append(
+                    ExactHandSummariesScenarioResponse(
+                        assumptions=assumptions,
+                        status="complete",
+                        result=result,
+                    )
+                )
             elif isinstance(result, CompareAnalysisResponse):
                 compare_results.append(
                     CompareScenarioResponse(
@@ -804,6 +1060,29 @@ def analyze_exact(
             scenarios=action_forecast_results,
             deck_count_summaries=(
                 _action_deck_summaries(action_forecast_results)
+                if "deck_count" in plan.uncertainty
+                else []
+            ),
+        )
+    if isinstance(payload.options, ExactHandSummariesOptions):
+        target = ActionForecastTargetResponse(
+            seat=payload.options.target.seat,
+            hand_id=payload.options.target.hand_id,
+        )
+        ordered_targets = [
+            ActionForecastTargetResponse(
+                seat=player.seat,
+                hand_id=player.hand_id or f"seat-{player.seat}-hand-1",
+            )
+            for player in payload.state.players
+            if player.seat == target.seat
+        ]
+        return ExactHandSummariesScenarioAnalysisResponse(
+            target=target,
+            model_uncertainty=list(plan.uncertainty),
+            scenarios=hand_summary_results,
+            deck_count_summaries=(
+                _hand_deck_summaries(hand_summary_results, ordered_targets)
                 if "deck_count" in plan.uncertainty
                 else []
             ),

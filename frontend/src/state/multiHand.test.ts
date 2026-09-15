@@ -109,6 +109,33 @@ describe("multi-hand session chronology", () => {
     expect(selectObservedCardCount(state)).toBe(4);
   });
 
+  it("targets and undoes a value-only observation on one split child", () => {
+    const splitState = split(pairedSeat());
+    const withValue = gameReducer(splitState, {
+      type: "DEAL_VALUE_CARD",
+      target: { kind: "player-hand", seat: 4, handId: "seat-4-hand-1-2" },
+      card: { kind: "value", value: "10" },
+    });
+
+    expect(selectTableState(withValue).playerHands[4]).toEqual([
+      expect.objectContaining({
+        handId: "seat-4-hand-1-1",
+        parentHandId: "seat-4-hand-1",
+        cards: [eightHearts],
+      }),
+      expect.objectContaining({
+        handId: "seat-4-hand-1-2",
+        parentHandId: "seat-4-hand-1",
+        cards: [eightClubs, { kind: "value", value: "10" }],
+      }),
+    ]);
+
+    const undoneCard = gameReducer(withValue, { type: "UNDO" });
+    expect(undoneCard).toEqual(splitState);
+    expect(undoneCard.events.at(-1)?.type).toBe("PLAYER_HAND_SPLIT");
+    expect(gameReducer(undoneCard, { type: "UNDO" })).toEqual(pairedSeat());
+  });
+
   it("serializes every hand with exact composition and one explicit analysis hand", () => {
     const state = split(pairedSeat());
     const withoutTarget = toTableStatePayload(state);

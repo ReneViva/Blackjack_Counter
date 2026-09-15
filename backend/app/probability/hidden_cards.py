@@ -4,12 +4,15 @@ import math
 
 from app.domain import (
     ALL_CARDS,
+    BlackjackValueClass,
     Card,
     DealerCheckResult,
     Hand,
     Rank,
     Shoe,
     UnknownCard,
+    ValueOnlyCard,
+    to_blackjack_value_class,
 )
 from app.engine import ReconstructedTableState, evaluate_hand
 
@@ -17,6 +20,7 @@ from .exact import ExactAnalysisError
 
 
 _RANKS = tuple(Rank)
+_VALUE_CLASSES = tuple(BlackjackValueClass)
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +30,7 @@ class HiddenStateBranch:
     dealer_hand: Hand
     user_hand: Hand
     removed_rank_counts: tuple[int, ...]
+    removed_value_counts: tuple[int, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +45,10 @@ def _rank_counts(shoe: Shoe) -> tuple[int, ...]:
         sum(count for card, count in shoe.composition if card.rank is rank)
         for rank in _RANKS
     )
+
+
+def _value_counts(shoe: Shoe) -> tuple[int, ...]:
+    return tuple(count for _, count in shoe.value_composition)
 
 
 def _compositions(
@@ -110,10 +119,43 @@ def _remove_rank_counts(
     for rank_index, total_removed in enumerate(removed):
         for _ in range(total_removed - selected_by_rank[rank_index]):
             take(rank_index)
-    return Shoe(shoe.decks, tuple(counts), 0), tuple(selected)
+    return (
+        Shoe(
+            decks=shoe.decks,
+            card_counts=tuple(counts),
+            unknown_removed_count=0,
+            value_only_removed_counts=shoe.value_only_removed_counts,
+        ),
+        tuple(selected),
+    )
 
 
-def _replace_unknowns(hand: Hand, cards: Iterator[Card]) -> Hand:
+def _remove_value_counts(
+    shoe: Shoe,
+    removed: tuple[int, ...],
+    relevant_sequence: tuple[int, ...],
+) -> tuple[Shoe, tuple[ValueOnlyCard, ...]]:
+    value_only_removed = list(shoe.value_only_removed_counts)
+    for index, count in enumerate(removed):
+        value_only_removed[index] += count
+    selected = tuple(
+        ValueOnlyCard(_VALUE_CLASSES[index]) for index in relevant_sequence
+    )
+    return (
+        Shoe(
+            decks=shoe.decks,
+            card_counts=shoe.card_counts,
+            unknown_removed_count=0,
+            value_only_removed_counts=tuple(value_only_removed),
+        ),
+        selected,
+    )
+
+
+def _replace_unknowns(
+    hand: Hand,
+    cards: Iterator[Card | ValueOnlyCard],
+) -> Hand:
     return Hand(
         cards=tuple(next(cards) if isinstance(card, UnknownCard) else card for card in hand.cards)
     )
@@ -156,6 +198,39 @@ def _draw_card(
             return index, card
         selection -= count
     raise AssertionError("weighted card selection did not resolve")
+
+
+def _draw_value(
+    counts: list[int], rng, *, allowed=None
+) -> tuple[int, ValueOnlyCard]:
+    eligible = [
+        (index, ValueOnlyCard(value), count)
+        for index, (value, count) in enumerate(
+            zip(_VALUE_CLASSES, counts, strict=True)
+        )
+        if count > 0 and (allowed is None or allowed(ValueOnlyCard(value)))
+    ]
+    total = sum(count for _, _, count in eligible)
+    if total == 0:
+        raise ExactAnalysisError(
+            "dealer_check_evidence_impossible",
+            "No hidden-card assignment is compatible with the observed dealer check.",
+        )
+    selection = rng.randrange(total)
+    for index, card, count in eligible:
+        if selection < count:
+            counts[index] -= 1
+            return index, card
+        selection -= count
+    raise AssertionError("weighted value selection did not resolve")
+
+
+def _observation_value(card: Card | ValueOnlyCard) -> BlackjackValueClass:
+    return (
+        to_blackjack_value_class(card.rank)
+        if isinstance(card, Card)
+        else card.value
+    )
 
 
 def sample_hidden_state(
@@ -207,24 +282,23 @@ def sample_hidden_state(
         )
 
     if dealer_check_result is not DealerCheckResult.NOT_REQUIRED:
-        if len(dealer_cards) < 2 or not isinstance(dealer_cards[0], Card):
+        if len(dealer_cards) < 2 or not isinstance(
+            dealer_cards[0], (Card, ValueOnlyCard)
+        ):
             raise ExactAnalysisError(
                 "dealer_check_evidence_invalid",
                 "Dealer-check evidence requires a known eligible upcard and a second card.",
             )
         upcard = dealer_cards[0]
-        if upcard.rank not in (
-            Rank.ACE,
-            Rank.TEN,
-            Rank.JACK,
-            Rank.QUEEN,
-            Rank.KING,
+        if _observation_value(upcard) not in (
+            BlackjackValueClass.ACE,
+            BlackjackValueClass.TEN,
         ):
             raise ExactAnalysisError(
                 "dealer_check_evidence_invalid",
                 "Dealer-check evidence requires an Ace or ten-valued upcard.",
             )
-        if isinstance(dealer_cards[1], Card) and not _blackjack_compatible(
+        if isinstance(dealer_cards[1], (Card, ValueOnlyCard)) and not _blackjack_compatible(
             Hand(cards=tuple(dealer_cards)), dealer_check_result
         ):
             raise ExactAnalysisError(
@@ -232,8 +306,13 @@ def sample_hidden_state(
                 "The known dealer hand contradicts the observed dealer check.",
             )
 
-    counts = list(state.game_state.shoe.card_counts)
+    shoe = state.game_state.shoe
+    use_value_composition = shoe.has_value_only_removals
+    counts = list(
+        _value_counts(shoe) if use_value_composition else shoe.card_counts
+    )
     removed_by_rank = [0] * len(_RANKS)
+    removed_by_value = [0] * len(_VALUE_CLASSES)
     for kind, index in slots:
         allowed = None
         if (
@@ -243,7 +322,7 @@ def sample_hidden_state(
         ):
             upcard = dealer_cards[0]
 
-            def allowed(card: Card, upcard=upcard) -> bool:
+            def allowed(card: Card | ValueOnlyCard, upcard=upcard) -> bool:
                 candidate = Hand(cards=(upcard, card))
                 blackjack = bool(evaluate_hand(candidate).blackjack)
                 return (
@@ -252,8 +331,12 @@ def sample_hidden_state(
                     else blackjack
                 )
 
-        _, selected = _draw_card(counts, rng, allowed=allowed)
-        removed_by_rank[_RANKS.index(selected.rank)] += 1
+        if use_value_composition:
+            selected_index, selected = _draw_value(counts, rng, allowed=allowed)
+            removed_by_value[selected_index] += 1
+        else:
+            _, selected = _draw_card(counts, rng, allowed=allowed)
+            removed_by_rank[_RANKS.index(selected.rank)] += 1
         if kind == "dealer":
             dealer_cards[index] = selected
         elif kind == "user":
@@ -266,12 +349,36 @@ def sample_hidden_state(
             "dealer_check_evidence_impossible",
             "The sampled dealer hand contradicts the observed dealer check.",
         )
+    if use_value_composition:
+        value_only_removed = tuple(
+            existing + removed
+            for existing, removed in zip(
+                shoe.value_only_removed_counts,
+                removed_by_value,
+                strict=True,
+            )
+        )
+        resolved_shoe = Shoe(
+            decks=shoe.decks,
+            card_counts=shoe.card_counts,
+            unknown_removed_count=0,
+            value_only_removed_counts=value_only_removed,
+        )
+    else:
+        resolved_shoe = Shoe(
+            decks=shoe.decks,
+            card_counts=tuple(counts),
+            unknown_removed_count=0,
+        )
     return HiddenStateBranch(
         weight=1.0,
-        shoe=Shoe(state.game_state.shoe.decks, tuple(counts), 0),
+        shoe=resolved_shoe,
         dealer_hand=dealer_hand,
         user_hand=user_hand,
         removed_rank_counts=tuple(removed_by_rank),
+        removed_value_counts=(
+            tuple(removed_by_value) if use_value_composition else None
+        ),
     )
 
 
@@ -322,6 +429,11 @@ def enumerate_hidden_states(
                     dealer_hand=state.dealer_hand,
                     user_hand=users[0].hand,
                     removed_rank_counts=(0,) * len(_RANKS),
+                    removed_value_counts=(
+                        (0,) * len(_VALUE_CLASSES)
+                        if shoe.has_value_only_removals
+                        else None
+                    ),
                 ),
             ),
             states_evaluated=0,
@@ -333,7 +445,10 @@ def enumerate_hidden_states(
         for hand in (state.dealer_hand, users[0].hand)
         for card in hand.cards
     )
-    available_rank_counts = _rank_counts(shoe)
+    use_value_composition = shoe.has_value_only_removals
+    available_counts = (
+        _value_counts(shoe) if use_value_composition else _rank_counts(shoe)
+    )
     denominator = math.comb(shoe.exact_total, hidden_count)
     if denominator == 0:
         raise ExactAnalysisError(
@@ -343,11 +458,11 @@ def enumerate_hidden_states(
     raw_branches: list[HiddenStateBranch] = []
     raw_weights: list[float] = []
     states_evaluated = 0
-    for removed in _compositions(available_rank_counts, hidden_count):
+    for removed in _compositions(available_counts, hidden_count):
         composition_weight = (
             math.prod(
                 math.comb(capacity, count)
-                for capacity, count in zip(available_rank_counts, removed, strict=True)
+                for capacity, count in zip(available_counts, removed, strict=True)
             )
             / denominator
         )
@@ -360,7 +475,11 @@ def enumerate_hidden_states(
                     "exact_computation_limit",
                     "Exact analysis exceeded the configured state limit.",
                 )
-            resolved_shoe, selected = _remove_rank_counts(shoe, removed, sequence)
+            resolved_shoe, selected = (
+                _remove_value_counts(shoe, removed, sequence)
+                if use_value_composition
+                else _remove_rank_counts(shoe, removed, sequence)
+            )
             selected_cards = iter(selected)
             dealer_hand = _replace_unknowns(state.dealer_hand, selected_cards)
             user_hand = _replace_unknowns(users[0].hand, selected_cards)
@@ -374,7 +493,14 @@ def enumerate_hidden_states(
                     shoe=resolved_shoe,
                     dealer_hand=dealer_hand,
                     user_hand=user_hand,
-                    removed_rank_counts=removed,
+                    removed_rank_counts=(
+                        (0,) * len(_RANKS)
+                        if use_value_composition
+                        else removed
+                    ),
+                    removed_value_counts=(
+                        removed if use_value_composition else None
+                    ),
                 )
             )
 
@@ -391,6 +517,7 @@ def enumerate_hidden_states(
             dealer_hand=branch.dealer_hand,
             user_hand=branch.user_hand,
             removed_rank_counts=branch.removed_rank_counts,
+            removed_value_counts=branch.removed_value_counts,
         )
         for branch in raw_branches
     )

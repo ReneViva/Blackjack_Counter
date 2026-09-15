@@ -22,6 +22,10 @@ function decimal(value: number): string {
   return Number.isInteger(value) ? value.toFixed(1) : String(value);
 }
 
+function signedTag(value: number, fraction: string): string {
+  return value > 0 ? `+${fraction}` : fraction;
+}
+
 function OutcomeReference({ outcomes }: Readonly<{
   outcomes: OutcomeProbabilities;
 }>) {
@@ -119,6 +123,15 @@ export function ResearchSystemCards({
             <div><dt>Decimal</dt><dd>{decimal(score.raw_score)}</dd></div>
           </dl>
           <p className="research-source-title">Source-backed definition: {score.definition.source.title}</p>
+          <p className="research-tag-vector">
+            <strong>Canonical tags:</strong>{" "}
+            {score.definition.canonical_tags.map((tag, index) => (
+              <span key={tag.card_value}>{tag.card_value} {signedTag(tag.tag_decimal, tag.tag_fraction)}{index < score.definition.canonical_tags.length - 1 ? "," : ""}</span>
+            ))}
+          </p>
+          <p className="research-balance-note">
+            {score.definition.balanced ? `Balanced Level ${score.definition.level}: a complete deck's card weights sum to zero.` : `Level ${score.definition.level} research system.`}
+          </p>
           <p className="research-metric-label">Published static metrics</p>
           <PublishedMetrics score={score} />
           <PhysicalStateReference
@@ -130,12 +143,39 @@ export function ResearchSystemCards({
           <details className="research-meaning">
             <summary>What this means</summary>
             <p>The research score is the sum of the system&apos;s source-backed card weights over the simulated observed-card state.</p>
-            <p>It is not a win probability or action recommendation.</p>
+            <p>It is not Win probability, Push probability, or Loss probability, and it is not an action recommendation.</p>
             <p><strong>Playing Efficiency (PE)</strong> describes how strongly a system tracks composition-sensitive playing information.</p>
             <p><strong>Betting Correlation (BC)</strong> is the published correlation between count weights and card-removal effects associated with overall player advantage.</p>
             <p><strong>Insurance Correlation (IC)</strong> describes how strongly the system tracks insurance-relevant composition information.</p>
             <p>PE, BC, and IC are published static comparison metrics, not probabilities for the current hand.</p>
           </details>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+export function ResearchSystemSummaryRows({ scores }: Readonly<{
+  scores: readonly ResearchScore[];
+}>) {
+  return (
+    <div className={`research-summary-rows${scores.length === 4 ? " research-summary-rows--four" : ""}`} role="list" aria-label="Compact research-system summaries">
+      {scores.map((score) => (
+        <article
+          aria-label={`${score.definition.label} compact research summary`}
+          className="research-summary-row"
+          key={score.definition.identifier}
+          role="listitem"
+        >
+          <div className="research-summary-row__identity">
+            <strong>{score.definition.label}</strong>
+            <span>{score.complete ? "Complete" : "Incomplete"}</span>
+          </div>
+          <div className="research-summary-row__score">
+            <strong>{score.raw_score_fraction}</strong>
+            <span>({decimal(score.raw_score)})</span>
+          </div>
+          <PublishedMetrics score={score} />
         </article>
       ))}
     </div>

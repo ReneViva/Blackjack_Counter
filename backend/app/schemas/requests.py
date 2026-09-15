@@ -28,6 +28,14 @@ class ExactAnalysisOptions(BaseModel):
     dealer_check_result: DealerCheckResult = DealerCheckResult.NOT_REQUIRED
 
 
+class ExactHandSummariesOptions(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    method: Literal["exact_hand_summaries"] = "exact_hand_summaries"
+    target: PlayerHandTargetSchema
+    dealer_check_result: DealerCheckResult = DealerCheckResult.NOT_REQUIRED
+
+
 class ExactAnalysisRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -65,6 +73,7 @@ class CompareAnalysisOptions(BaseModel):
 
 AnalysisOptions = Annotated[
     ExactAnalysisOptions
+    | ExactHandSummariesOptions
     | ExactActionForecastOptions
     | MonteCarloAnalysisOptions
     | CompareAnalysisOptions,

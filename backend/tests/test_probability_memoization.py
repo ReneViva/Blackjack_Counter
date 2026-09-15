@@ -1,6 +1,14 @@
 from dataclasses import replace
 
-from app.domain import ALL_CARDS, DealerSoft17, Hand, Rank, Rules, Shoe, Suit
+from app.domain import (
+    ALL_CARDS,
+    DealerSoft17,
+    Hand,
+    Rank,
+    Rules,
+    Shoe,
+    Suit,
+)
 from app.probability import (
     canonical_round_key,
     canonical_shoe_key,
@@ -114,3 +122,19 @@ def test_cache_is_isolated_between_analyses() -> None:
 
     assert first == second
     assert first.metrics.cache_hits > 0
+
+
+def test_value_composition_is_part_of_generic_shoe_cache_key() -> None:
+    ace_removed = Shoe(
+        decks=1,
+        card_counts=(1,) * 52,
+        value_only_removed_counts=(1,) + (0,) * 9,
+    )
+    ten_removed = Shoe(
+        decks=1,
+        card_counts=(1,) * 52,
+        value_only_removed_counts=(0,) * 9 + (1,),
+    )
+
+    assert canonical_shoe_key(ace_removed) != canonical_shoe_key(ten_removed)
+    assert canonical_shoe_key(ace_removed) == canonical_shoe_key(ace_removed)

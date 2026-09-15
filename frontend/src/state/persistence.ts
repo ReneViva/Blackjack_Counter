@@ -7,7 +7,7 @@ import type { SessionState } from "./gameReducer";
 
 export const SESSION_STORAGE_KEY = "blackjack-probability-lab.session" as const;
 export const SESSION_STORAGE_FORMAT = "blackjack-session-storage" as const;
-export const SESSION_SCHEMA_VERSION = 2 as const;
+export const SESSION_SCHEMA_VERSION = 3 as const;
 export const MAX_PERSISTED_SESSION_BYTES = 1024 * 1024;
 
 export type PersistedSession = Readonly<{
@@ -109,15 +109,15 @@ export function parsePersistedSession(text: string): SessionState {
   if (parsed.format !== SESSION_STORAGE_FORMAT) {
     corrupt("invalid_persistence_format", `Saved session format must be ${SESSION_STORAGE_FORMAT}.`);
   }
-  if (parsed.version !== 1 && parsed.version !== SESSION_SCHEMA_VERSION) {
-    corrupt("unsupported_persistence_version", "Only saved-session versions 1 and 2 are supported.");
+  if (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== SESSION_SCHEMA_VERSION) {
+    corrupt("unsupported_persistence_version", "Only saved-session versions 1, 2, and 3 are supported.");
   }
 
   try {
     return reconstructSerializedSession(
       parsed.session,
       true,
-      parsed.version as 1 | 2,
+      parsed.version as 1 | 2 | typeof SESSION_SCHEMA_VERSION,
     );
   } catch (cause: unknown) {
     if (cause instanceof ReplayImportError) {

@@ -1,4 +1,5 @@
 from dataclasses import FrozenInstanceError
+from decimal import Decimal
 from fractions import Fraction
 from hashlib import sha256
 from pathlib import Path
@@ -9,6 +10,7 @@ from app.domain import Rank
 from app.research import (
     ACE_INFORMATION,
     APPROVED_PRIMARY_DEFINITIONS,
+    HI_LO,
     OMEGA_II,
     SOURCE_ID,
     SOURCE_PATH,
@@ -26,6 +28,21 @@ from app.research import (
 # A, 2, 3, 4, 5, 6, 7, 8, 9, T/J/Q/K order. These expectations are an
 # independent transcription and never read production definition constants.
 GOLDEN_TAGS = {
+    "hi_lo": {
+        Rank.ACE: Fraction(-1),
+        Rank.TWO: Fraction(1),
+        Rank.THREE: Fraction(1),
+        Rank.FOUR: Fraction(1),
+        Rank.FIVE: Fraction(1),
+        Rank.SIX: Fraction(1),
+        Rank.SEVEN: Fraction(0),
+        Rank.EIGHT: Fraction(0),
+        Rank.NINE: Fraction(0),
+        Rank.TEN: Fraction(-1),
+        Rank.JACK: Fraction(-1),
+        Rank.QUEEN: Fraction(-1),
+        Rank.KING: Fraction(-1),
+    },
     "wong_halves": {
         Rank.ACE: Fraction(-1),
         Rank.TWO: Fraction(1, 2),
@@ -87,12 +104,13 @@ def test_approved_source_hash_and_size_are_exact() -> None:
 
 def test_only_required_primary_definitions_are_registered() -> None:
     assert tuple(item.identifier for item in APPROVED_PRIMARY_DEFINITIONS) == (
+        "hi_lo",
         "wong_halves",
         "zen_count",
         "omega_ii",
     )
     identifiers = {item.identifier for item in APPROVED_PRIMARY_DEFINITIONS}
-    assert "hi_lo" not in identifiers
+    assert "hi_lo" in identifiers
     assert ACE_INFORMATION.identifier not in identifiers
 
 
@@ -140,6 +158,11 @@ def test_balanced_definition_checksum_is_exact_zero(
 
 
 def test_source_backed_classification_and_metadata() -> None:
+    assert HI_LO.level == 1
+    assert HI_LO.ace_classification is AceClassification.RECKONED
+    assert HI_LO.published_metrics.playing_efficiency == Decimal("0.51")
+    assert HI_LO.published_metrics.betting_correlation == Decimal("0.97")
+    assert HI_LO.published_metrics.insurance_correlation == Decimal("0.76")
     assert WONG_HALVES.level == 3
     assert WONG_HALVES.ace_classification is AceClassification.RECKONED
     assert ZEN_COUNT.level == 2

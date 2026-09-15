@@ -150,3 +150,27 @@ def test_concrete_model_retains_single_result_contract() -> None:
     assert payload["method"] == "exact"
     assert "scenarios" not in payload
     assert payload["outcomes"]["win"] == 1.0
+
+
+def test_unknown_deck_excludes_models_with_insufficient_value_capacity() -> None:
+    state = terminal_state(decks=None)
+    state["dealer"] = {"cards": [known("9", "D"), known("8", "D")]}
+    state["players"] = [
+        {
+            "seat": 1,
+            "is_user": True,
+            "cards": [known("9", "H"), known("8", "H")],
+        }
+    ]
+    state["discarded_cards"] = [
+        {"kind": "value", "value": "10"} for _ in range(17)
+    ]
+
+    payload = analyze(state).json()
+
+    assert payload["scenarios"][0]["status"] == "invalid"
+    assert payload["scenarios"][0]["error"]["code"] == "value_class_capacity_exceeded"
+    assert all(item["status"] == "complete" for item in payload["scenarios"][1:])
+    summary = payload["deck_count_summaries"][0]
+    assert summary["included_deck_counts"] == list(range(2, 9))
+    assert summary["excluded_deck_counts"][0]["deck_count"] == 1

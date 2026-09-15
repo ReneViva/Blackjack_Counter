@@ -7,6 +7,7 @@ import { createInitialState, DEFAULT_CONFIGURATION } from "../../state/initialSt
 import AnalysisSidebar from "./AnalysisSidebar";
 
 const definitions: readonly ResearchDefinition[] = [
+  ["hi_lo", "Hi-Lo"],
   ["wong_halves", "Wong Halves"],
   ["zen_count", "Zen Count"],
   ["omega_ii", "Omega II"],
@@ -16,6 +17,11 @@ const definitions: readonly ResearchDefinition[] = [
   balanced: true,
   level: 2,
   ace_classification: "ace_neutral",
+  canonical_tags: [
+    { card_value: "A", tag_fraction: "-1", tag_decimal: -1 },
+    { card_value: "2", tag_fraction: "1", tag_decimal: 1 },
+    { card_value: "10", tag_fraction: "-1", tag_decimal: -1 },
+  ],
   source: { source_id: "approved-source", title: "Approved Counting Systems", local_path: "research/sources/approved-counting-systems.md", sha256: "343d", locator: "fixture" },
   published_metrics: { kind: "published_static_metadata", pe: .55, bc: .92, ic: .78 },
 }));
@@ -246,8 +252,8 @@ function researchResponse(rawScore: number): Response {
       method: "research_comparison",
       scores: definitions.map((definition) => ({
         definition,
-        raw_score: rawScore,
-        raw_score_fraction: `${rawScore}/1`,
+        raw_score: definition.identifier === "hi_lo" ? 0 : rawScore,
+        raw_score_fraction: definition.identifier === "hi_lo" ? "0" : `${rawScore}/1`,
         observed_known_cards: 3,
         unresolved_unknown_cards: 0,
         complete: true,
@@ -285,12 +291,69 @@ afterEach(() => {
 });
 
 describe("automatic analysis sidebar", () => {
+  it("renders compact Pro research rows with accessible Level 2 disclosures", async () => {
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      if (!url.endsWith("/analyze")) return researchResponse(2);
+      const body = JSON.parse(init.body as string);
+      return body.options.method === "exact_action_forecast"
+        ? forecastResponse(.4, .2)
+        : exactResponse(.5);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { container } = render(
+      <AnalysisSidebar
+        activeTarget={{ kind: "player-hand", seat: 4, handId: "seat-4-hand-1" }}
+        state={startedState()}
+        workspaceMode="pro"
+      />,
+    );
+
+    const summaries = await screen.findByRole("list", {
+      name: "Compact research-system summaries",
+    }, { timeout: 1500 });
+    for (const label of ["Hi-Lo", "Wong Halves", "Zen Count", "Omega II"]) {
+      const row = within(summaries).getByRole("listitem", {
+        name: `${label} compact research summary`,
+      });
+      expect(row).toHaveTextContent(label);
+      expect(row).toHaveTextContent("PE0.55BC0.92IC0.78");
+      if (label === "Hi-Lo") expect(row).toHaveTextContent("0");
+    }
+    const details = screen.getByText("Research details").parentElement!;
+    const comparison = screen.getByText("Compare systems").parentElement!;
+    expect(details).not.toHaveAttribute("open");
+    expect(comparison).not.toHaveAttribute("open");
+    expect(within(details).getByText(/Raw research scores summarize/)).toBeInTheDocument();
+    expect(within(details).getByText(/Ace Information is a separate auxiliary/)).toBeInTheDocument();
+    expect(container.querySelector(".action-forecast__results > .forecast-list"))
+      .toBeInTheDocument();
+    for (const label of [
+      "Stand now forecast",
+      "Hit once, then stand forecast",
+      "Double — one card, then stand forecast",
+      "Surrender now forecast",
+      "Split one card to each hand, then stand forecast",
+    ]) {
+      expect(screen.getByRole("article", { name: label })).toBeInTheDocument();
+    }
+    expect(screen.getByRole("region", { name: "Ace Information" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Table Information" })).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Research details"));
+    expect(details).toHaveAttribute("open");
+    expect(screen.getAllByText("What this means")).toHaveLength(4);
+    fireEvent.click(screen.getByText("Compare systems"));
+    expect(comparison).toHaveAttribute("open");
+    expect(screen.getByRole("table", { name: "Research-system comparison" })).toHaveTextContent("Hi-Lo");
+    expect(screen.getByText("Known aces observed").nextSibling).toHaveTextContent("1");
+    expect(screen.getByLabelText("Exact win probability")).toHaveAttribute("aria-valuetext", "50.0%");
+  });
+
   it("distinguishes incomplete and unavailable analysis states in live status text", async () => {
     const incomplete = gameReducer(createInitialState(), { type: "ADD_PLAYER", seat: 4 });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(researchResponse(0)));
     const { rerender } = render(<AnalysisSidebar state={incomplete} />);
 
-    expect(await screen.findByText("Analysis needs more observations", {}, { timeout: 1500 })).toBeVisible();
+    expect(await screen.findByText("Awaiting required observations", {}, { timeout: 1500 })).toBeVisible();
 
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     rerender(<AnalysisSidebar state={startedState()} />);
@@ -318,6 +381,7 @@ describe("automatic analysis sidebar", () => {
     expect(await screen.findByLabelText("Exact win probability", {}, { timeout: 1500 })).toHaveAttribute("aria-valuetext", "50.0%");
     expect(screen.getAllByText("2/1")).toHaveLength(6);
     expect(screen.getByText("Known aces observed").nextSibling).toHaveTextContent("1");
+    expect(screen.getByRole("heading", { name: "Hi-Lo" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Wong Halves" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Zen Count" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Omega II" })).toBeVisible();
@@ -366,6 +430,40 @@ describe("automatic analysis sidebar", () => {
     expect(await screen.findByText("Calculating exact hypothetical outcomes...", {}, { timeout: 1500 })).toBeVisible();
     rerender(<AnalysisSidebar activeTarget={null} state={state} />);
     expect(await screen.findByText("Select a primary hand to calculate its hypothetical outcomes.", {}, { timeout: 1500 })).toBeVisible();
+  });
+
+  it("keeps previous exact and forecast values visible while the next state updates", async () => {
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      if (!url.endsWith("/analyze")) return researchResponse(2);
+      const body = JSON.parse(init.body as string);
+      return body.options.method === "exact_action_forecast"
+        ? forecastResponse(.4, .2)
+        : exactResponse(.5);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const state = startedState();
+    const target = { kind: "player-hand" as const, seat: 4 as const, handId: "seat-4-hand-1" };
+    const { rerender } = render(<AnalysisSidebar activeTarget={target} state={state} />);
+    expect(await screen.findByLabelText("Exact win probability", {}, { timeout: 1500 }))
+      .toHaveAttribute("aria-valuetext", "50.0%");
+    expect(await screen.findByLabelText("Stand now forecast", {}, { timeout: 1500 }))
+      .toHaveTextContent("40.0%");
+
+    fetchMock.mockImplementation(() => new Promise<Response>(() => undefined));
+    const changed = gameReducer(state, {
+      type: "DEAL_VALUE_CARD",
+      target,
+      card: { kind: "value", value: "2" },
+    });
+    rerender(<AnalysisSidebar activeTarget={target} state={changed} />);
+
+    expect(screen.getByText("Updating from Python…")).toBeVisible();
+    expect(screen.getByLabelText("Exact win probability"))
+      .toHaveAttribute("aria-valuetext", "50.0%");
+    expect(screen.getByLabelText("Stand now forecast")).toHaveTextContent("40.0%");
+    expect(screen.getByText(/previous values remain visible/i)).toBeVisible();
+    expect(screen.getByLabelText("Stand now forecast").closest(".analysis-results--updating"))
+      .not.toBeNull();
   });
 
   it("renders independent backend explanations for unavailable extended actions", async () => {
@@ -506,13 +604,13 @@ describe("automatic analysis sidebar", () => {
       card: { kind: "known", rank: "A", suit: "clubs" },
     });
     rerender(<AnalysisSidebar state={newer} />);
-    expect(await screen.findAllByText("80.0%", {}, { timeout: 1500 })).toHaveLength(4);
+    expect(await screen.findAllByText("80.0%", {}, { timeout: 1500 })).toHaveLength(5);
     expect(screen.getAllByText("8/1")).toHaveLength(6);
 
     oldResolvers[0](exactResponse(.1));
     oldResolvers[1](researchResponse(1));
     await new Promise((resolve) => window.setTimeout(resolve, 30));
-    expect(screen.getAllByText("80.0%")).toHaveLength(4);
+    expect(screen.getAllByText("80.0%")).toHaveLength(5);
     expect(screen.queryAllByText("1/1")).toHaveLength(0);
   });
 });

@@ -3,6 +3,7 @@ from typing import Literal
 
 from app.domain import (
     ALL_CARDS,
+    BlackjackValueClass,
     Card,
     DealerBlackjackCheckRule,
     DealerCheckResult,
@@ -19,6 +20,8 @@ from app.domain import (
     RoundState,
     Shoe,
     UnknownCard,
+    ValueOnlyCard,
+    to_blackjack_value_class,
     initial_hand_id,
     split_child_hand_ids,
 )
@@ -30,9 +33,6 @@ from .validator import validate_game_state, validate_round_state
 
 
 _CARD_INDEX = {card: index for index, card in enumerate(ALL_CARDS)}
-_CHECK_UPCARDS = {Rank.ACE, Rank.TEN, Rank.JACK, Rank.QUEEN, Rank.KING}
-
-
 @dataclass(frozen=True, slots=True)
 class DrawTarget:
     kind: Literal["dealer", "player"]
@@ -128,6 +128,18 @@ def _remove_observed_card(shoe: Shoe, card: ObservedCard) -> Shoe:
                 "No physical card remains for an unknown observation.",
             ) from error
 
+    if isinstance(card, ValueOnlyCard):
+        counts = list(shoe.value_only_removed_counts)
+        counts[tuple(BlackjackValueClass).index(card.value)] += 1
+        try:
+            return replace(shoe, value_only_removed_counts=tuple(counts))
+        except ValueError as error:
+            raise TransitionError(
+                "card_unavailable",
+                f"No card of blackjack value {card.value.value} remains in the shoe.",
+            ) from error
+
+    assert isinstance(card, Card)
     index = _CARD_INDEX[card]
     if shoe.card_counts[index] == 0:
         raise TransitionError(
@@ -136,7 +148,13 @@ def _remove_observed_card(shoe: Shoe, card: ObservedCard) -> Shoe:
         )
     counts = list(shoe.card_counts)
     counts[index] -= 1
-    return replace(shoe, card_counts=tuple(counts))
+    try:
+        return replace(shoe, card_counts=tuple(counts))
+    except ValueError as error:
+        raise TransitionError(
+            "card_unavailable",
+            f"No {card.rank.value}{card.suit.value} remains in the shoe.",
+        ) from error
 
 
 def _reveal_from_shoe(shoe: Shoe, card: Card) -> Shoe:
@@ -153,11 +171,17 @@ def _reveal_from_shoe(shoe: Shoe, card: Card) -> Shoe:
         )
     counts = list(shoe.card_counts)
     counts[index] -= 1
-    return replace(
-        shoe,
-        card_counts=tuple(counts),
-        unknown_removed_count=shoe.unknown_removed_count - 1,
-    )
+    try:
+        return replace(
+            shoe,
+            card_counts=tuple(counts),
+            unknown_removed_count=shoe.unknown_removed_count - 1,
+        )
+    except ValueError as error:
+        raise TransitionError(
+            "card_unavailable",
+            f"No {card.rank.value}{card.suit.value} remains available to reveal.",
+        ) from error
 
 
 def _append_card(hand: Hand, card: ObservedCard) -> Hand:
@@ -251,8 +275,13 @@ def _dealer_check_required(state: GameState) -> bool:
         rules.dealer_second_card is DealerSecondCardRule.HOLE_CARD
         and rules.dealer_blackjack_check is DealerBlackjackCheckRule.PEEK
         and len(cards) >= 2
-        and isinstance(cards[0], Card)
-        and cards[0].rank in _CHECK_UPCARDS
+        and isinstance(cards[0], (Card, ValueOnlyCard))
+        and (
+            to_blackjack_value_class(cards[0].rank)
+            if isinstance(cards[0], Card)
+            else cards[0].value
+        )
+        in (BlackjackValueClass.ACE, BlackjackValueClass.TEN)
         and isinstance(cards[1], UnknownCard)
     )
 

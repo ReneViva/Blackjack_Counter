@@ -1,13 +1,29 @@
 from dataclasses import dataclass
 from typing import TypeAlias
 
-from app.domain import Card, Hand, PlayerHandState, Rank, RoundState, Rules, Shoe
+from app.domain import (
+    Card,
+    Hand,
+    PlayerHandState,
+    Rank,
+    RoundState,
+    Rules,
+    Shoe,
+    ValueOnlyCard,
+)
 
 
 CanonicalKey: TypeAlias = tuple[object, ...]
 
 
 def canonical_shoe_key(shoe: Shoe) -> tuple[object, ...]:
+    if shoe.has_value_only_removals:
+        return (
+            "value_composition",
+            shoe.decks,
+            shoe.unknown_removed_count,
+            tuple(count for _, count in shoe.value_composition),
+        )
     rank_counts = tuple(
         sum(count for card, count in shoe.composition if card.rank is rank)
         for rank in Rank
@@ -17,7 +33,14 @@ def canonical_shoe_key(shoe: Shoe) -> tuple[object, ...]:
 
 def canonical_hand_key(hand: Hand) -> tuple[str, ...]:
     return tuple(
-        sorted(card.rank.value if isinstance(card, Card) else "?" for card in hand.cards)
+        sorted(
+            card.rank.value
+            if isinstance(card, Card)
+            else f"value:{card.value.value}"
+            if isinstance(card, ValueOnlyCard)
+            else "?"
+            for card in hand.cards
+        )
     )
 
 

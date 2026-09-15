@@ -10,6 +10,7 @@ from app.main import app
 from app.probability import ExactAnalysisError, sample_hidden_state, simulate_table
 from app.schemas import TableStateSchema
 
+from test_analyze_api import exact_micro_state, value_equivalent_state
 from test_analysis_scenarios import terminal_state
 from test_hidden_card_marginalization import hidden, known, state_with_available
 
@@ -100,6 +101,23 @@ def test_simulation_does_not_mutate_input() -> None:
 
     assert state == original
     assert state.game_state.shoe.unknown_removed_count == 1
+
+
+def test_value_only_monte_carlo_is_seeded_and_uses_complete_mass() -> None:
+    state = build_table_state(
+        TableStateSchema.model_validate(
+            value_equivalent_state(exact_micro_state())
+        )
+    )
+
+    first = simulate_table(state, 200, seed=2026)
+    second = simulate_table(state, 200, seed=2026)
+
+    assert first == second
+    assert first.counts.total == 200
+    assert first.outcomes.total == 1.0
+    assert state.game_state is not None
+    assert state.game_state.shoe.has_value_only_removals
 
 
 @pytest.mark.parametrize("simulations", [0, -1, True, 1_000_001])

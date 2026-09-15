@@ -3,6 +3,7 @@ from dataclasses import replace
 import pytest
 
 from app.domain import (
+    BlackjackValueClass,
     Card,
     DealerBlackjackCheckRule,
     DealerCheckResult,
@@ -22,6 +23,7 @@ from app.domain import (
     Suit,
     SurrenderRule,
     UnknownCard,
+    ValueOnlyCard,
 )
 from app.engine import (
     RevealTarget,
@@ -80,7 +82,7 @@ def make_game(
         observed
         for hand in (dealer, *players)
         for observed in hand.cards
-        if isinstance(observed, Card)
+        if isinstance(observed, (Card, ValueOnlyCard))
     )
     unknown_count = sum(
         isinstance(observed, UnknownCard)
@@ -97,6 +99,56 @@ def make_game(
 
 def rules(**changes: object) -> Rules:
     return replace(Rules(1, DealerSoft17.STAND), **changes)
+
+
+def test_value_only_dealer_upcard_preserves_peek_gate() -> None:
+    peek = rules(
+        dealer_second_card=DealerSecondCardRule.HOLE_CARD,
+        dealer_blackjack_check=DealerBlackjackCheckRule.PEEK,
+    )
+    state = start_round(
+        make_game(
+            rules=peek,
+            dealer=Hand(
+                cards=(
+                    ValueOnlyCard(BlackjackValueClass.ACE),
+                    UnknownCard(),
+                )
+            ),
+            players=(
+                Hand(
+                    cards=(
+                        ValueOnlyCard(BlackjackValueClass.TEN),
+                        ValueOnlyCard(BlackjackValueClass.EIGHT),
+                    )
+                ),
+            ),
+        )
+    )
+
+    assert state.phase is RoundPhase.DEALER_CHECK
+    assert state.dealer_check_result is DealerCheckResult.PENDING
+    assert validate_round_state(state).valid
+
+
+def test_value_only_pair_does_not_invent_exact_rank_for_split_legality() -> None:
+    state = start_round(
+        make_game(
+            players=(
+                Hand(
+                    cards=(
+                        ValueOnlyCard(BlackjackValueClass.TEN),
+                        ValueOnlyCard(BlackjackValueClass.TEN),
+                    )
+                ),
+            )
+        )
+    )
+
+    decision = player_action_decision(state, PlayerAction.SPLIT)
+
+    assert decision.allowed is False
+    assert decision.code == "exact_pair_required"
 
 
 def test_extended_rule_defaults_and_transport_compatibility() -> None:

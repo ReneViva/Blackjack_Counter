@@ -20,14 +20,19 @@ from .responses import (
 from .table import TableStateSchema
 
 
-ResearchDefinitionId = Literal["wong_halves", "zen_count", "omega_ii"]
+ResearchDefinitionId = Literal["hi_lo", "wong_halves", "zen_count", "omega_ii"]
 
 
 class ResearchComparisonOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     primary_definition_ids: list[ResearchDefinitionId] = Field(
-        default_factory=lambda: ["wong_halves", "zen_count", "omega_ii"],
+        default_factory=lambda: [
+            "hi_lo",
+            "wong_halves",
+            "zen_count",
+            "omega_ii",
+        ],
         min_length=1,
     )
     include_ace_information: StrictBool = False
@@ -72,6 +77,14 @@ class PublishedResearchMetricsResponse(BaseModel):
     ic: float
 
 
+class ResearchTagResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    card_value: Rank
+    tag_fraction: str
+    tag_decimal: float
+
+
 class ResearchDefinitionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -80,6 +93,7 @@ class ResearchDefinitionResponse(BaseModel):
     balanced: bool
     level: int
     ace_classification: Literal["ace_reckoned", "ace_neutral"]
+    canonical_tags: list[ResearchTagResponse]
     source: ResearchSourceResponse
     published_metrics: PublishedResearchMetricsResponse
 
@@ -157,9 +171,14 @@ class ResearchBatchRequest(BaseModel):
 
     state: TableStateSchema
     definition_ids: list[ResearchDefinitionId] = Field(
-        default_factory=lambda: ["wong_halves", "zen_count", "omega_ii"],
+        default_factory=lambda: [
+            "hi_lo",
+            "wong_halves",
+            "zen_count",
+            "omega_ii",
+        ],
         min_length=1,
-        max_length=3,
+        max_length=4,
     )
     case_count: StrictInt = Field(default=25, ge=2, le=50)
     removed_cards_per_case: StrictInt = Field(default=6, ge=0, le=20)

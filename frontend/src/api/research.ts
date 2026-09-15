@@ -5,6 +5,7 @@ import { getApiBaseUrl } from "./client";
 import { toTableStatePayload } from "./tableState";
 
 export const RESEARCH_DEFINITIONS = [
+  { id: "hi_lo", label: "Hi-Lo" },
   { id: "wong_halves", label: "Wong Halves" },
   { id: "zen_count", label: "Zen Count" },
   { id: "omega_ii", label: "Omega II" },
@@ -20,6 +21,11 @@ export type ResearchDefinition = Readonly<{
   balanced: boolean;
   level: number;
   ace_classification: "ace_reckoned" | "ace_neutral";
+  canonical_tags: readonly Readonly<{
+    card_value: "A" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "10" | "J" | "Q" | "K";
+    tag_fraction: string;
+    tag_decimal: number;
+  }>[];
   source: Readonly<{
     source_id: string;
     title: string;

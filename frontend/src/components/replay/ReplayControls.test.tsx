@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { gameReducer, type SessionState } from "../../state/gameReducer";
 import { createInitialState, DEFAULT_CONFIGURATION } from "../../state/initialState";
 import { serializeSessionReplay } from "../../replay/sessionReplay";
+import { SESSION_STORAGE_KEY } from "../../state/persistence";
 import ReplayControls from "./ReplayControls";
 
 function startedSession(): SessionState {
@@ -31,6 +32,7 @@ function replayFile(state = startedSession()): File {
 }
 
 afterEach(() => {
+  window.localStorage.removeItem(SESSION_STORAGE_KEY);
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -120,5 +122,31 @@ describe("ReplayControls", () => {
     expect(screen.getByLabelText("Import Replay (.json)")).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByLabelText("Import Replay (.json)")).toHaveAccessibleDescription(/not valid JSON/);
     expect(onActivate).not.toHaveBeenCalled();
+  });
+
+  it("does not activate or overwrite storage for a malformed value-only v3 import", async () => {
+    const current = startedSession();
+    const withValue = gameReducer(current, {
+      type: "DEAL_VALUE_CARD",
+      target: { kind: "dealer" },
+      card: { kind: "value", value: "10" },
+    });
+    const replay = JSON.parse(serializeSessionReplay(withValue)) as {
+      session: { events: Array<Record<string, unknown>> };
+    };
+    replay.session.events.at(-1)!.card = { kind: "value", value: "K" };
+    const text = JSON.stringify(replay);
+    const file = { name: "bad-value.json", size: text.length, text: async () => text } as unknown as File;
+    const onActivate = vi.fn();
+    window.localStorage.setItem(SESSION_STORAGE_KEY, "unchanged");
+    render(<ReplayControls state={current} onActivate={onActivate} />);
+
+    fireEvent.change(screen.getByLabelText("Import Replay (.json)"), {
+      target: { files: [file] },
+    });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Value-only card value is unsupported");
+    expect(onActivate).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem(SESSION_STORAGE_KEY)).toBe("unchanged");
   });
 });

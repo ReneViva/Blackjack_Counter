@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionConfiguration } from "../domain/game";
+import { splitChildHandIds } from "../domain/hands";
+import { toLegacyTableStatePayload, toTableStatePayload } from "../api/tableState";
 import { gameReducer, type SessionState } from "../state/gameReducer";
 import { createInitialState, DEFAULT_RULES } from "../state/initialState";
 import { selectTableState } from "../state/selectors";
@@ -35,6 +37,57 @@ function nontrivialSession(): SessionState {
   state = gameReducer(state, { type: "ROUND_COMPLETE" });
   state = gameReducer(state, { type: "SHUFFLE" });
   return state;
+}
+
+function mixedValueSession(): SessionState {
+  let state = gameReducer(createInitialState(configuration), { type: "NEW_SHOE" });
+  state = gameReducer(state, {
+    type: "DEAL_KNOWN_CARD",
+    target: { kind: "dealer" },
+    card: { kind: "known", rank: "A", suit: "spades" },
+  });
+  state = gameReducer(state, {
+    type: "DEAL_KNOWN_CARD",
+    target: { kind: "player", seat: 3 },
+    card: { kind: "known", rank: "Q", suit: "hearts" },
+  });
+  for (const value of ["7", "10"] as const) {
+    state = gameReducer(state, {
+      type: "DEAL_VALUE_CARD",
+      target: { kind: "player", seat: 3 },
+      card: { kind: "value", value },
+    });
+  }
+  return gameReducer(state, {
+    type: "DEAL_UNKNOWN_CARD",
+    target: { kind: "dealer" },
+  });
+}
+
+function splitValueSession(): SessionState {
+  let state = gameReducer(createInitialState(configuration), { type: "NEW_SHOE" });
+  for (const suit of ["hearts", "clubs"] as const) {
+    state = gameReducer(state, {
+      type: "DEAL_KNOWN_CARD",
+      target: { kind: "player", seat: 3 },
+      card: { kind: "known", rank: "8", suit },
+    });
+  }
+  const [leftHandId, rightHandId] = splitChildHandIds("seat-3-hand-1");
+  state = gameReducer(state, {
+    type: "SPLIT_PLAYER_HAND",
+    seat: 3,
+    handId: "seat-3-hand-1",
+    leftHandId,
+    rightHandId,
+    splitDepth: 1,
+    fromSplitAces: false,
+  });
+  return gameReducer(state, {
+    type: "DEAL_VALUE_CARD",
+    target: { kind: "player-hand", seat: 3, handId: rightHandId },
+    card: { kind: "value", value: "10" },
+  });
 }
 
 function replayObject(): Record<string, unknown> {
@@ -106,6 +159,94 @@ describe("versioned session replay", () => {
     });
   });
 
+  it("reads historical replay versions 1 and 2 without changing exact-card semantics", () => {
+    const original = nontrivialSession();
+    const v1 = replayObject();
+    v1.version = 1;
+    v1.final_state = toLegacyTableStatePayload(original);
+    const v2 = replayObject();
+    v2.version = 2;
+
+    for (const replay of [v1, v2]) {
+      const restored = parseSessionReplay(JSON.stringify(replay));
+      expect(restored).toEqual(original);
+      expect(restored.events[1]).toMatchObject({
+        type: "DEAL_KNOWN_CARD",
+        card: { kind: "known", rank: "A", suit: "spades" },
+      });
+    }
+  });
+
+  it("round-trips mixed exact, value-only, and unknown precision in replay v3", () => {
+    const original = mixedValueSession();
+    const restored = parseSessionReplay(serializeSessionReplay(original));
+
+    expect(restored).toEqual(original);
+    expect(createSessionReplay(original).version).toBe(3);
+    expect(selectTableState(restored).dealerCards).toEqual([
+      { kind: "known", rank: "A", suit: "spades" },
+      { kind: "unknown" },
+    ]);
+    expect(selectTableState(restored).playerHands[3][0].cards).toEqual([
+      { kind: "known", rank: "Q", suit: "hearts" },
+      { kind: "value", value: "7" },
+      { kind: "value", value: "10" },
+    ]);
+    expect(toTableStatePayload(restored)).toEqual(toTableStatePayload(original));
+  });
+
+  it.each(["A", "2", "3", "4", "5", "6", "7", "8", "9", "10"] as const)(
+    "round-trips generic value %s without fabricating rank, suit, or Unknown",
+    (value) => {
+      const original = gameReducer(
+        gameReducer(createInitialState(configuration), { type: "NEW_SHOE" }),
+        {
+          type: "DEAL_VALUE_CARD",
+          target: { kind: "dealer" },
+          card: { kind: "value", value },
+        },
+      );
+      const restored = parseSessionReplay(serializeSessionReplay(original));
+      expect(selectTableState(restored).dealerCards).toEqual([
+        { kind: "value", value },
+      ]);
+    },
+  );
+
+  it("preserves split IDs, lineage, target hand, and value precision", () => {
+    const original = splitValueSession();
+    const restored = parseSessionReplay(serializeSessionReplay(original));
+
+    expect(restored).toEqual(original);
+    expect(selectTableState(restored).playerHands[3]).toEqual(
+      selectTableState(original).playerHands[3],
+    );
+    expect(selectTableState(restored).playerHands[3][1]).toMatchObject({
+      handId: "seat-3-hand-1-2",
+      parentHandId: "seat-3-hand-1",
+      cards: [
+        { kind: "known", rank: "8", suit: "clubs" },
+        { kind: "value", value: "10" },
+      ],
+    });
+  });
+
+  it("preserves value-only observations in completed and departed discard history", () => {
+    let completed = gameReducer(mixedValueSession(), { type: "ROUND_COMPLETE" });
+    completed = parseSessionReplay(serializeSessionReplay(completed));
+    expect(selectTableState(completed).discardedCards).toContainEqual({
+      kind: "value",
+      value: "10",
+    });
+
+    let departed = gameReducer(splitValueSession(), { type: "LEAVE_PLAYER", seat: 3 });
+    departed = parseSessionReplay(serializeSessionReplay(departed));
+    expect(selectTableState(departed).discardedCards).toContainEqual({
+      kind: "value",
+      value: "10",
+    });
+  });
+
   it("preserves event chronology for subsequent undo", () => {
     const replayed = parseSessionReplay(serializeSessionReplay(nontrivialSession()));
     const undone = gameReducer(replayed, { type: "UNDO" });
@@ -161,7 +302,7 @@ describe("versioned session replay", () => {
     expectReplayError(replay, format === undefined ? "invalid_replay_structure" : code);
   });
 
-  it.each([undefined, 3, "1", true])("rejects missing or unsupported version %#", (version) => {
+  it.each([undefined, 4, "1", true])("rejects missing or unsupported version %#", (version) => {
     const replay = replayObject();
     if (version === undefined) delete replay.version; else replay.version = version;
     expectReplayError(replay, version === undefined ? "invalid_replay_structure" : "unsupported_replay_version");
@@ -199,6 +340,37 @@ describe("versioned session replay", () => {
     [{ kind: "unknown" }, "invalid_replay_structure"],
   ])("rejects invalid known-card representation %#", (card, code) => {
     expectReplayError(replaceEvent({ card }), code);
+  });
+
+  it.each([
+    {},
+    { kind: "value" },
+    { kind: "value", value: "J" },
+    { kind: "value", value: "Q" },
+    { kind: "value", value: "K" },
+    { kind: "value", value: 1 },
+    { kind: "value", value: 11 },
+    { kind: "value", value: "invalid" },
+    { kind: "value", value: "10", suit: "spades" },
+    { kind: "value", value: "10", rank: "10", suit: "spades" },
+    { kind: "other", value: "10" },
+  ])("rejects malformed value-only card representation %#", (card) => {
+    const replay = JSON.parse(serializeSessionReplay(mixedValueSession())) as {
+      session: { events: Array<Record<string, unknown>> };
+    };
+    const event = replay.session.events.find((candidate) =>
+      candidate.type === "DEAL_VALUE_CARD"
+    )!;
+    event.card = card;
+    expectReplayError(replay, Object.keys(card).length === 2
+      ? "invalid_replay_event"
+      : "invalid_replay_structure");
+  });
+
+  it("rejects a value-only event declared as historical replay v2", () => {
+    const replay = JSON.parse(serializeSessionReplay(mixedValueSession())) as Record<string, unknown>;
+    replay.version = 2;
+    expectReplayError(replay, "unsupported_replay_event");
   });
 
   it("rejects an event targeting an inactive player seat", () => {

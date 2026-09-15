@@ -1,7 +1,16 @@
 import pytest
 from pydantic import ValidationError
 
-from app.domain import Card, DealerSoft17, GameState, Rank, Suit, UnknownCard
+from app.domain import (
+    BlackjackValueClass,
+    Card,
+    DealerSoft17,
+    GameState,
+    Rank,
+    Suit,
+    UnknownCard,
+    ValueOnlyCard,
+)
 from app.engine import build_table_state
 from app.schemas import TableStateSchema
 
@@ -112,3 +121,63 @@ def test_schema_rejects_malformed_transport_values(
 
     with pytest.raises(ValidationError):
         TableStateSchema.model_validate(raw)
+
+
+def test_reconstructs_value_only_cards_across_table_and_history() -> None:
+    raw = representative_payload()
+    raw["dealer"] = {"cards": [{"kind": "value", "value": "A"}]}
+    raw["players"] = [
+        {
+            "seat": 3,
+            "is_user": True,
+            "hand_id": "seat-3-hand-1-1",
+            "parent_hand_id": "seat-3-hand-1",
+            "split_depth": 1,
+            "cards": [{"kind": "value", "value": "5"}],
+        },
+        {
+            "seat": 3,
+            "hand_id": "seat-3-hand-1-2",
+            "parent_hand_id": "seat-3-hand-1",
+            "split_depth": 1,
+            "cards": [{"kind": "value", "value": "10"}],
+        },
+    ]
+    raw["discarded_cards"] = [{"kind": "value", "value": "7"}]
+
+    state = build_table_state(TableStateSchema.model_validate(raw))
+
+    assert state.game_state is not None
+    assert state.known_card_count == 4
+    assert state.unknown_card_count == 0
+    assert state.dealer_hand.cards == (
+        ValueOnlyCard(BlackjackValueClass.ACE),
+    )
+    assert state.game_state.shoe.value_count(BlackjackValueClass.ACE) == 7
+    assert state.game_state.shoe.value_count(BlackjackValueClass.FIVE) == 7
+    assert state.game_state.shoe.value_count(BlackjackValueClass.SEVEN) == 7
+    assert state.game_state.shoe.value_count(BlackjackValueClass.TEN) == 31
+    assert state.game_state.shoe.unknown_removed_count == 0
+
+
+def test_mixed_exact_value_only_and_unknown_remain_distinct() -> None:
+    raw = representative_payload()
+    raw["dealer"] = {
+        "cards": [
+            {"kind": "known", "rank": "Q", "suit": "H"},
+            {"kind": "value", "value": "10"},
+            {"kind": "unknown"},
+        ]
+    }
+    raw["players"] = []
+    raw["discarded_cards"] = []
+
+    state = build_table_state(TableStateSchema.model_validate(raw))
+
+    assert state.game_state is not None
+    assert isinstance(state.dealer_hand.cards[0], Card)
+    assert isinstance(state.dealer_hand.cards[1], ValueOnlyCard)
+    assert isinstance(state.dealer_hand.cards[2], UnknownCard)
+    assert state.game_state.shoe.value_count(BlackjackValueClass.TEN) == 30
+    assert state.game_state.shoe.unknown_removed_count == 1
+    assert state.game_state.shoe.count(Card(Rank.QUEEN, Suit.HEARTS)) == 1

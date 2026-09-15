@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from app.domain import (
     ALL_CARDS,
+    BlackjackValueClass,
     Card,
     DealerBlackjackCheckRule,
     DealerCheckResult,
@@ -15,6 +16,9 @@ from app.domain import (
     RoundPhase,
     RoundState,
     UnknownCard,
+    ValueOnlyCard,
+    blackjack_value_capacity,
+    to_blackjack_value_class,
 )
 
 from .state_builder import ReconstructedTableState
@@ -49,6 +53,13 @@ def validate_table_state(state: ReconstructedTableState) -> ValidationResult:
     warnings: list[ValidationIssue] = []
     observed_cards = tuple(_all_observed_cards(state))
     known_cards = tuple(card for card in observed_cards if isinstance(card, Card))
+    known_value_classes = tuple(
+        to_blackjack_value_class(card.rank)
+        if isinstance(card, Card)
+        else card.value
+        for card in observed_cards
+        if isinstance(card, (Card, ValueOnlyCard))
+    )
 
     if state.deck_count is None:
         warnings.append(
@@ -86,6 +97,23 @@ def validate_table_state(state: ReconstructedTableState) -> ValidationResult:
                         message=(
                             f"Observed {count} cards of rank {rank.value}; a "
                             f"{state.deck_count}-deck shoe contains {maximum}."
+                        ),
+                        field="cards",
+                    )
+                )
+
+        value_counts = Counter(known_value_classes)
+        for value in BlackjackValueClass:
+            count = value_counts[value]
+            maximum = blackjack_value_capacity(value, state.deck_count)
+            if count > maximum:
+                errors.append(
+                    ValidationIssue(
+                        code="value_class_capacity_exceeded",
+                        message=(
+                            f"Observed {count} cards of blackjack value "
+                            f"{value.value}; a {state.deck_count}-deck shoe "
+                            f"contains {maximum}."
                         ),
                         field="cards",
                     )
@@ -219,6 +247,12 @@ def validate_game_state(state: GameState) -> ValidationResult:
         for card in hand.cards
         if isinstance(card, Card)
     )
+    value_only_in_hands = Counter(
+        card.value
+        for hand in (state.dealer_hand, *state.player_hands)
+        for card in hand.cards
+        if isinstance(card, ValueOnlyCard)
+    )
 
     for card in ALL_CARDS:
         represented = state.shoe.count(card) + known_in_hands[card]
@@ -240,6 +274,21 @@ def validate_game_state(state: GameState) -> ValidationResult:
         for hand in (state.dealer_hand, *state.player_hands)
         for card in hand.cards
     )
+    for value in BlackjackValueClass:
+        removed = state.shoe.value_only_removed_counts[
+            tuple(BlackjackValueClass).index(value)
+        ]
+        if value_only_in_hands[value] > removed:
+            errors.append(
+                ValidationIssue(
+                    code="value_removal_count_mismatch",
+                    message=(
+                        "The shoe has fewer aggregate value removals than "
+                        f"value-only {value.value} cards in active hands."
+                    ),
+                    field="shoe.value_only_removed_counts",
+                )
+            )
     if unknown_in_hands > state.shoe.unknown_removed_count:
         errors.append(
             ValidationIssue(
@@ -382,9 +431,13 @@ def validate_round_state(state: RoundState) -> ValidationResult:
     dealer_cards = state.game_state.dealer_hand.cards
     check_observation_eligible = (
         len(dealer_cards) >= 2
-        and isinstance(dealer_cards[0], Card)
-        and dealer_cards[0].rank
-        in (Rank.ACE, Rank.TEN, Rank.JACK, Rank.QUEEN, Rank.KING)
+        and isinstance(dealer_cards[0], (Card, ValueOnlyCard))
+        and (
+            to_blackjack_value_class(dealer_cards[0].rank)
+            if isinstance(dealer_cards[0], Card)
+            else dealer_cards[0].value
+        )
+        in (BlackjackValueClass.ACE, BlackjackValueClass.TEN)
         and isinstance(dealer_cards[1], UnknownCard)
     )
     if (

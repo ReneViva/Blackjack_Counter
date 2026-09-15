@@ -71,6 +71,25 @@ class ActionForecastTargetResponse(BaseModel):
     hand_id: str
 
 
+class ExactHandSummaryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target: ActionForecastTargetResponse
+    status: Literal["complete", "unavailable"]
+    state_summary: AnalysisStateSummary | None = None
+    outcomes: OutcomeProbabilities | None = None
+    metadata: AnalysisMetadata | None = None
+    error: APIErrorDetail | None = None
+
+
+class ExactHandSummariesResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    method: Literal["exact_hand_summaries"] = "exact_hand_summaries"
+    target: ActionForecastTargetResponse
+    hands: list[ExactHandSummaryResponse]
+
+
 class ExactActionForecastResultResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -319,6 +338,34 @@ class ExactScenarioAnalysisResponse(BaseModel):
     exact_state_limit_per_scenario: int = 2_000_000
     scenarios: list[ExactScenarioResponse]
     deck_count_summaries: list[UniformDeckCountSummaryResponse] = Field(
+        default_factory=list
+    )
+
+
+class ExactHandSummariesScenarioResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    assumptions: ScenarioAssumptionsResponse
+    status: Literal["complete", "invalid", "unavailable"]
+    result: ExactHandSummariesResponse | None = None
+    error: APIErrorDetail | None = None
+
+
+class UniformHandDeckCountSummaryResponse(UniformDeckCountSummaryResponse):
+    target: ActionForecastTargetResponse
+
+
+class ExactHandSummariesScenarioAnalysisResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    method: Literal["exact_hand_summaries"] = "exact_hand_summaries"
+    target: ActionForecastTargetResponse
+    model_uncertainty: list[Literal["deck_count", "dealer_soft_17"]]
+    aggregation: Literal["none"] = "none"
+    resource_limit_scope: Literal["per_scenario"] = "per_scenario"
+    exact_state_limit_per_scenario: int = 2_000_000
+    scenarios: list[ExactHandSummariesScenarioResponse]
+    deck_count_summaries: list[UniformHandDeckCountSummaryResponse] = Field(
         default_factory=list
     )
 

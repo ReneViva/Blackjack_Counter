@@ -102,7 +102,7 @@ def test_seed_is_required() -> None:
     assert client.post("/api/research/batch", json=payload).status_code == 422
 
 
-@pytest.mark.parametrize("definition", ("ace_information", "hi_lo", "missing"))
+@pytest.mark.parametrize("definition", ("ace_information", "missing"))
 def test_non_primary_definition_is_rejected(definition: str) -> None:
     response = client.post(
         "/api/research/batch", json=request(definition_ids=[definition])

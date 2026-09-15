@@ -30,6 +30,10 @@ export type ObservedCardPayload =
         | "K";
       suit: "S" | "H" | "D" | "C";
     }>
+  | Readonly<{
+      kind: "value";
+      value: "A" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "10";
+    }>
   | Readonly<{ kind: "unknown" }>;
 
 export type TableStatePayload = Readonly<{
@@ -62,8 +66,11 @@ export type TableStatePayload = Readonly<{
 }>;
 
 function toObservedCardPayload(card: ObservedCard): ObservedCardPayload {
-  return card.kind === "known"
-    ? { kind: "known", rank: card.rank, suit: SUIT_CODES[card.suit] }
+  if (card.kind === "known") {
+    return { kind: "known", rank: card.rank, suit: SUIT_CODES[card.suit] };
+  }
+  return card.kind === "value"
+    ? { kind: "value", value: card.value }
     : { kind: "unknown" };
 }
 

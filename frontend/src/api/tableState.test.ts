@@ -135,4 +135,25 @@ describe("table-state transport contract", () => {
       { kind: "known", rank: "7", suit: "C" },
     ]);
   });
+
+  it("preserves value-only precision for the P2 backend schema", () => {
+    let state = gameReducer(createInitialState(configuration), { type: "NEW_SHOE" });
+    state = gameReducer(state, {
+      type: "DEAL_VALUE_CARD",
+      target: { kind: "dealer" },
+      card: { kind: "value", value: "10" },
+    });
+    state = gameReducer(state, {
+      type: "DEAL_VALUE_CARD",
+      target: { kind: "player", seat: 3 },
+      card: { kind: "value", value: "A" },
+    });
+
+    const payload = toTableStatePayload(state);
+    expect(payload.dealer.cards).toEqual([{ kind: "value", value: "10" }]);
+    expect(payload.players.find((player) => player.seat === 3)?.cards).toEqual([
+      { kind: "value", value: "A" },
+    ]);
+    expect(JSON.stringify(payload)).not.toMatch(/rank|suit|unknown/);
+  });
 });

@@ -1,4 +1,4 @@
-import type { KnownCard } from "./card";
+import type { KnownCard, ValueOnlyCard } from "./card";
 import type { SeatNumber, SessionConfiguration } from "./game";
 
 export type TableTarget =
@@ -34,6 +34,13 @@ export type DealUnknownCardEvent = EventIdentity &
   Readonly<{
     type: "DEAL_UNKNOWN_CARD";
     target: RecordedTableTarget;
+  }>;
+
+export type DealValueCardEvent = EventIdentity &
+  Readonly<{
+    type: "DEAL_VALUE_CARD";
+    target: RecordedTableTarget;
+    card: ValueOnlyCard;
   }>;
 
 export type PlayerAddedEvent = EventIdentity &
@@ -75,6 +82,7 @@ export type GameEvent =
   | PlayerHandSplitEvent
   | PlayerLeftEvent
   | DealKnownCardEvent
+  | DealValueCardEvent
   | DealUnknownCardEvent
   | RoundCompleteEvent
   | ShuffleEvent;
@@ -104,6 +112,11 @@ export type SessionAction =
   | Readonly<{
       type: "DEAL_UNKNOWN_CARD";
       target: RecordedTableTarget;
+    }>
+  | Readonly<{
+      type: "DEAL_VALUE_CARD";
+      target: RecordedTableTarget;
+      card: ValueOnlyCard;
     }>
   | Readonly<{ type: "UNDO" }>
   | Readonly<{ type: "RESET" }>

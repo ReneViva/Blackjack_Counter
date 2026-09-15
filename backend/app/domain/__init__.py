@@ -1,4 +1,15 @@
-from .card import ALL_CARDS, Card, ObservedCard, Rank, Suit, UnknownCard
+from .card import (
+    ALL_CARDS,
+    BlackjackValueClass,
+    Card,
+    CardObservation,
+    ObservedCard,
+    Rank,
+    Suit,
+    UnknownCard,
+    ValueOnlyCard,
+    to_blackjack_value_class,
+)
 from .hand import Hand
 from .outcome import Outcome
 from .round import (
@@ -18,12 +29,14 @@ from .rules import (
     Rules,
     SurrenderRule,
 )
-from .shoe import Shoe
+from .shoe import Shoe, blackjack_value_capacity
 from .state import GameState
 
 __all__ = [
     "ALL_CARDS",
+    "BlackjackValueClass",
     "Card",
+    "CardObservation",
     "DealerSoft17",
     "DealerBlackjackCheckRule",
     "DealerCheckResult",
@@ -45,4 +58,7 @@ __all__ = [
     "Suit",
     "SurrenderRule",
     "UnknownCard",
+    "ValueOnlyCard",
+    "blackjack_value_capacity",
+    "to_blackjack_value_class",
 ]

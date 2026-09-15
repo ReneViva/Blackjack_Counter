@@ -1,4 +1,4 @@
-import type { GameEvent, SessionAction } from "../domain/events";
+import type { GameEvent, RecordedTableTarget, SessionAction } from "../domain/events";
 import type { SessionConfiguration } from "../domain/game";
 import { initialHandId, splitChildHandIds } from "../domain/hands";
 import { createInitialState } from "./initialState";
@@ -76,7 +76,7 @@ function configurationFromChronology(
 
 function targetExists(
   state: SessionState,
-  target: Extract<SessionAction, { type: "DEAL_KNOWN_CARD" }>["target"],
+  target: RecordedTableTarget,
 ): boolean {
   if (target.kind === "dealer") return true;
   const handId = target.kind === "player"
@@ -166,6 +166,13 @@ export function gameReducer(
       if (!targetExists(state, action.target)) return state;
       return appendEvent(ensureSessionStarted(state), {
         type: "DEAL_KNOWN_CARD",
+        target: action.target,
+        card: action.card,
+      });
+    case "DEAL_VALUE_CARD":
+      if (!targetExists(state, action.target)) return state;
+      return appendEvent(ensureSessionStarted(state), {
+        type: "DEAL_VALUE_CARD",
         target: action.target,
         card: action.card,
       });

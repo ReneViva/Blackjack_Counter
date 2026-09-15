@@ -1,3 +1,4 @@
+from copy import deepcopy
 from dataclasses import replace
 import math
 
@@ -813,3 +814,52 @@ def test_extended_api_shapes_are_independent_and_non_monetary() -> None:
     serialized = response.text.lower()
     for forbidden in ("payout", "wager", "stake", "expected_value", "recommended", "best_action"):
         assert forbidden not in serialized
+
+
+def test_value_only_state_matches_exact_action_forecasts() -> None:
+    exact_request = api_payload()
+    value_request = deepcopy(exact_request)
+    state = value_request["state"]  # type: ignore[index]
+
+    def convert(cards: list[dict[str, str]]) -> list[dict[str, str]]:
+        return [
+            {
+                "kind": "value",
+                "value": (
+                    "10"
+                    if card["rank"] in ("10", "J", "Q", "K")
+                    else card["rank"]
+                ),
+            }
+            for card in cards
+        ]
+
+    state["dealer"]["cards"] = convert(state["dealer"]["cards"])  # type: ignore[index]
+    for player in state["players"]:  # type: ignore[index]
+        player["cards"] = convert(player["cards"])
+    state["discarded_cards"] = convert(state["discarded_cards"])  # type: ignore[index]
+
+    exact = client.post("/api/analyze", json=exact_request).json()[
+        "action_forecasts"
+    ]
+    value_only = client.post("/api/analyze", json=value_request).json()[
+        "action_forecasts"
+    ]
+
+    for action in (
+        "stand_now",
+        "hit_once_then_stand",
+        "double_one_card_then_stand",
+    ):
+        assert value_only[action]["status"] == "available"
+        for outcome in ("win", "push", "loss"):
+            assert math.isclose(
+                value_only[action]["outcomes"][outcome],
+                exact[action]["outcomes"][outcome],
+                abs_tol=1e-12,
+            )
+        assert math.isclose(
+            sum(value_only[action]["outcomes"].values()),
+            1.0,
+            abs_tol=1e-12,
+        )

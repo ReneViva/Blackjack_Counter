@@ -18,6 +18,11 @@ const definition = {
   balanced: true,
   level: 3,
   ace_classification: "ace_reckoned" as const,
+  canonical_tags: [
+    { card_value: "A" as const, tag_fraction: "-1", tag_decimal: -1 },
+    { card_value: "2" as const, tag_fraction: "1/2", tag_decimal: .5 },
+    { card_value: "10" as const, tag_fraction: "-1", tag_decimal: -1 },
+  ],
   source,
   published_metrics: {
     kind: "published_static_metadata" as const,
@@ -136,10 +141,11 @@ afterEach(() => {
 });
 
 describe("ResearchPanel", () => {
-  it("renders only the three approved primary-system selectors and bounded controls", () => {
+  it("renders only the four approved primary-system selectors and bounded controls", () => {
     render(<ResearchPanel state={session()} />);
 
     const systems = screen.getByRole("group", { name: "Primary research systems" });
+    expect(within(systems).getByLabelText("Hi-Lo")).toBeChecked();
     expect(within(systems).getByLabelText("Wong Halves")).toBeChecked();
     expect(within(systems).getByLabelText("Zen Count")).toBeChecked();
     expect(within(systems).getByLabelText("Omega II")).toBeChecked();
@@ -167,7 +173,7 @@ describe("ResearchPanel", () => {
     expect(within(card as HTMLElement).getByLabelText("Current exact physical-state probability reference")).toHaveTextContent("40.0%");
     expect(card).toHaveTextContent("Published static metrics");
     expect(screen.getByRole("heading", { name: "Ace Information" })).toBeVisible();
-    expect(screen.getByText(/not a fourth primary system/)).toBeVisible();
+    expect(screen.getByText(/not a primary system/)).toBeVisible();
   });
 
   it("sends one bounded batch request and renders computed metrics and unavailable cases safely", async () => {
@@ -180,7 +186,7 @@ describe("ResearchPanel", () => {
     const request = fetchMock.mock.calls[0][1] as RequestInit;
     expect(fetchMock.mock.calls[0][0]).toBe("http://127.0.0.1:8000/api/research/batch");
     expect(JSON.parse(request.body as string)).toMatchObject({
-      definition_ids: ["wong_halves", "zen_count", "omega_ii"],
+      definition_ids: ["hi_lo", "wong_halves", "zen_count", "omega_ii"],
       case_count: 25,
       removed_cards_per_case: 6,
       seed: 12345,

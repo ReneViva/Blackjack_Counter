@@ -1,22 +1,27 @@
 from dataclasses import dataclass
 
-from app.domain import Card, Hand, Rank, UnknownCard
+from app.domain import (
+    BlackjackValueClass,
+    Card,
+    Hand,
+    Rank,
+    UnknownCard,
+    ValueOnlyCard,
+    to_blackjack_value_class,
+)
 
 
-_HARD_VALUES = {
-    Rank.ACE: 1,
-    Rank.TWO: 2,
-    Rank.THREE: 3,
-    Rank.FOUR: 4,
-    Rank.FIVE: 5,
-    Rank.SIX: 6,
-    Rank.SEVEN: 7,
-    Rank.EIGHT: 8,
-    Rank.NINE: 9,
-    Rank.TEN: 10,
-    Rank.JACK: 10,
-    Rank.QUEEN: 10,
-    Rank.KING: 10,
+_VALUE_CLASS_HARD_VALUES = {
+    BlackjackValueClass.ACE: 1,
+    BlackjackValueClass.TWO: 2,
+    BlackjackValueClass.THREE: 3,
+    BlackjackValueClass.FOUR: 4,
+    BlackjackValueClass.FIVE: 5,
+    BlackjackValueClass.SIX: 6,
+    BlackjackValueClass.SEVEN: 7,
+    BlackjackValueClass.EIGHT: 8,
+    BlackjackValueClass.NINE: 9,
+    BlackjackValueClass.TEN: 10,
 }
 
 
@@ -56,14 +61,28 @@ def evaluate_hand(
             split_origin=split_origin,
         )
 
-    cards = tuple(card for card in hand.cards if isinstance(card, Card))
-    total = sum(_HARD_VALUES[card.rank] for card in cards)
-    ace_count = sum(card.rank is Rank.ACE for card in cards)
+    cards = tuple(
+        card
+        for card in hand.cards
+        if isinstance(card, (Card, ValueOnlyCard))
+    )
+    values = tuple(
+        to_blackjack_value_class(card.rank)
+        if isinstance(card, Card)
+        else card.value
+        for card in cards
+    )
+    total = sum(_VALUE_CLASS_HARD_VALUES[value] for value in values)
+    ace_count = sum(value is BlackjackValueClass.ACE for value in values)
     soft = ace_count > 0 and total + 10 <= 21
     if soft:
         total += 10
 
-    pair = len(cards) == 2 and cards[0].rank is cards[1].rank
+    pair = (
+        len(cards) == 2
+        and all(isinstance(card, Card) for card in cards)
+        and cards[0].rank is cards[1].rank
+    )
     blackjack = (
         len(cards) == 2
         and total == 21

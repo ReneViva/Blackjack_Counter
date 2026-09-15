@@ -4,11 +4,13 @@ import {
   AnalysisApiError,
   analyzeActionForecast,
   analyzeExact,
+  analyzeHandSummaries,
   type ActionForecastResponse,
   type AnalysisResponse,
   type ExactActionForecastScenarioAnalysisResponse,
   type ExactActionForecastResult,
   type ExactAnalysisResponse,
+  type HandSummariesResponse,
   type ExactSplitActionForecastResult,
   type ExactTerminalActionForecastResult,
   type OutcomeProbabilities,
@@ -26,17 +28,25 @@ import {
 } from "../../api/research";
 import type { SessionState } from "../../state/gameReducer";
 import type { TableTarget } from "../../domain/events";
+import type { SeatNumber } from "../../domain/game";
+import type { WorkspaceMode } from "../../domain/workspace";
 import { selectTableState } from "../../state/selectors";
 import {
   ResearchComparisonTable,
   ResearchSystemCards,
+  ResearchSystemSummaryRows,
 } from "../research/ResearchInterpretation";
 import ShoeStatus from "../table/ShoeStatus";
 
 type RequestStatus = "idle" | "updating" | "current" | "incomplete" | "unavailable";
+export const ANALYSIS_DEBOUNCE_MS = 220;
 type AnalysisSidebarProps = Readonly<{
   activeTarget?: TableTarget | null;
+  onSelectAnalysisTarget?: (
+    target: Extract<TableTarget, { kind: "player-hand" }>,
+  ) => void;
   state: SessionState;
+  workspaceMode?: WorkspaceMode;
 }>;
 
 function percentage(value: number): string {
@@ -181,11 +191,95 @@ function ActionDeckSummaries({ forecasts }: Readonly<{
   return <div className="deck-summary-list">{forecasts.deck_count_summaries.map((summary) => <section className="deck-model-summary" key={summary.dealer_soft_17} aria-label={`${summary.dealer_soft_17.toUpperCase()} action forecast deck-count summary`}><h4>{summary.dealer_soft_17.toUpperCase()} · Uniform deck-count summary</h4><DeckSummaryMetadata summary={summary} />{summary.status === "available" && summary.action_forecasts ? <div className="forecast-list"><UniformOutcomeForecast forecast={summary.action_forecasts.stand_now} label="Stand now" /><UniformOutcomeForecast forecast={summary.action_forecasts.hit_once_then_stand} label="Hit once, then stand" /><UniformOutcomeForecast forecast={summary.action_forecasts.double_one_card_then_stand} label="Double — one card, then stand" /><article className="forecast-card" aria-label="Surrender uniform deck-count summary"><h5>Surrender now</h5>{summary.action_forecasts.surrender_now.status === "available" && summary.action_forecasts.surrender_now.terminal === "surrendered" ? <><dl className="forecast-terminal"><div><dt>Terminal outcome</dt><dd>Surrendered</dd></div></dl><p className="forecast-note">No probability mean is assigned to this terminal action.</p></> : <p className="calm-status"><strong>Unavailable.</strong> {summary.action_forecasts.surrender_now.error?.message}</p>}</article><UniformSplitForecast forecast={summary.action_forecasts.split_one_card_each_then_stand} /></div> : <p className="calm-status"><strong>Unavailable.</strong> {summary.error?.message}</p>}<ActionScenarioDetails forecasts={forecasts} rule={summary.dealer_soft_17} /></section>)}</div>;
 }
 
-export default function AnalysisSidebar({ activeTarget = null, state }: AnalysisSidebarProps) {
+function SplitHandAnalysis({
+  analysis,
+  hands,
+  message,
+  onSelect,
+  seat,
+  selectedHandId,
+  status,
+}: Readonly<{
+  analysis: HandSummariesResponse | null;
+  hands: readonly Readonly<{ handId: string }>[];
+  message: string;
+  onSelect?: AnalysisSidebarProps["onSelectAnalysisTarget"];
+  seat: SeatNumber;
+  selectedHandId: string | null;
+  status: RequestStatus;
+}>) {
+  const concreteHands = analysis && "hands" in analysis ? analysis.hands : [];
+  const modelSummaries = analysis && "scenarios" in analysis
+    ? analysis.deck_count_summaries
+    : [];
+  return (
+    <section className="analysis-block split-hand-analysis" aria-labelledby="split-hand-analysis-title" aria-busy={status === "updating"}>
+      <div className="analysis-block__title">
+        <div><span className="analysis-kicker">Current split state</span><h3 id="split-hand-analysis-title">Split Hand Analysis — Seat {seat}</h3></div>
+        <span className="method-badge">Exact</span>
+      </div>
+      <div className="split-summary-list">
+        {hands.map((hand, index) => {
+          const selected = hand.handId === selectedHandId;
+          const concrete = concreteHands.find((item) => item.target.hand_id === hand.handId);
+          const models = modelSummaries.filter((item) => item.target.hand_id === hand.handId);
+          return (
+            <article className={`split-summary${selected ? " split-summary--selected" : ""}`} key={hand.handId}>
+              <button
+                aria-label={`Select Hand ${index + 1} for analysis`}
+                aria-pressed={selected}
+                className="split-summary__select"
+                onClick={() => onSelect?.({ kind: "player-hand", seat, handId: hand.handId })}
+                type="button"
+              >
+                <span className="split-summary__heading"><strong>Hand {index + 1}</strong>{selected && <span>Selected</span>}</span>
+              </button>
+              {concrete?.status === "complete" && concrete.outcomes ? (
+                <div className={status === "updating" ? "analysis-results--updating" : undefined}>
+                  <ForecastProbabilityList outcomes={concrete.outcomes} />
+                  {status === "updating" && (
+                    <span className="split-summary__status">Updating exact outcomes…</span>
+                  )}
+                </div>
+              ) : models.length > 0 ? (
+                <span className={`split-summary__models${status === "updating" ? " analysis-results--updating" : ""}`}>
+                  {models.map((model) => <span key={model.dealer_soft_17}>
+                    {models.length > 1 && <strong>{model.dealer_soft_17.toUpperCase()}</strong>}
+                    {model.status === "available" && model.outcomes && model.ranges ? <>
+                      <ModelProbabilityList outcomes={model.outcomes} ranges={model.ranges} />
+                      <small>Uniform summary across {model.included_deck_counts.length} valid deck-count models.</small>
+                    </> : <span className="split-summary__status">{model.error?.message ?? "Model summary unavailable."}</span>}
+                  </span>)}
+                  {status === "updating" && (
+                    <span className="split-summary__status">Updating exact outcomes…</span>
+                  )}
+                </span>
+              ) : <span className="split-summary__status">{status === "updating" ? "Updating exact outcomes…" : concrete?.error?.message ?? message}</span>}
+            </article>
+          );
+        })}
+      </div>
+      {selectedHandId && (
+        <p className="forecast-note">
+          Selected Hand {hands.findIndex((hand) => hand.handId === selectedHandId) + 1} feeds the hypothetical action forecast below.
+        </p>
+      )}
+    </section>
+  );
+}
+
+export default function AnalysisSidebar({
+  activeTarget = null,
+  onSelectAnalysisTarget,
+  state,
+  workspaceMode = "normal",
+}: AnalysisSidebarProps) {
   const [status, setStatus] = useState<RequestStatus>("idle");
   const [forecastStatus, setForecastStatus] = useState<RequestStatus>("idle");
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
+  const [handSummaries, setHandSummaries] = useState<HandSummariesResponse | null>(null);
   const [forecasts, setForecasts] = useState<ActionForecastResponse | null>(null);
+  const [forecastResultHandId, setForecastResultHandId] = useState<string | null>(null);
   const [research, setResearch] = useState<ResearchComparisonResponse | null>(null);
   const [analysisMessage, setAnalysisMessage] = useState("Waiting for an analyzable table state.");
   const [forecastMessage, setForecastMessage] = useState("Select a primary hand to calculate hypothetical outcomes.");
@@ -207,8 +301,11 @@ export default function AnalysisSidebar({ activeTarget = null, state }: Analysis
       : null;
   const userCards = selectedUserHand?.cards ?? [];
   const userHandCount = userHands.length;
-  const analysisHandId = userHandCount > 1 ? selectedUserHand?.handId ?? null : null;
+  const hasSplitHands = userHandCount > 1;
+  const analysisHandId = selectedUserHand?.handId ?? null;
   const canRunExact = userCards.length >= 2 && table.dealerCards.length >= 1;
+  const canRunHandSummaries = hasSplitHands && selectedUserHand !== null &&
+    table.dealerCards.length >= 1 && userHands.some((hand) => hand.cards.length >= 2);
   const forecastHand = activeTarget?.kind === "player-hand" &&
       activeTarget.seat === state.configuration.userSeat
     ? userHands.find((hand) => hand.handId === activeTarget.handId) ?? null
@@ -225,6 +322,7 @@ export default function AnalysisSidebar({ activeTarget = null, state }: Analysis
     if (!sessionStarted) {
       setStatus("idle");
       setAnalysis(null);
+      setHandSummaries(null);
       setResearch(null);
       setAnalysisMessage("Waiting for an analyzable table state.");
       setResearchMessage("Add a player or select the dealer to begin observations.");
@@ -232,6 +330,14 @@ export default function AnalysisSidebar({ activeTarget = null, state }: Analysis
     }
 
     setStatus("updating");
+    setAnalysisMessage(
+      hasSplitHands ? "Updating all split-hand summaries." : "Updating exact outcomes.",
+    );
+    if (hasSplitHands) {
+      setAnalysis(null);
+    } else {
+      setHandSummaries(null);
+    }
     const timeout = window.setTimeout(() => {
       const nextController = new AbortController();
       controller.current = nextController;
@@ -243,9 +349,14 @@ export default function AnalysisSidebar({ activeTarget = null, state }: Analysis
             handId: analysisHandId,
           }
         : null;
-      const exactRequest: Promise<AnalysisResponse | null> = canRunExact
-        ? analyzeExact(state, nextController.signal, analysisTarget)
-        : Promise.resolve(null);
+      const exactRequest: Promise<AnalysisResponse | HandSummariesResponse | null> =
+        hasSplitHands
+          ? canRunHandSummaries && analysisTarget?.kind === "player-hand"
+            ? analyzeHandSummaries(state, analysisTarget, nextController.signal)
+            : Promise.resolve(null)
+          : canRunExact
+            ? analyzeExact(state, nextController.signal, analysisTarget)
+            : Promise.resolve(null);
       void Promise.allSettled([
         exactRequest,
         compareResearch(
@@ -260,15 +371,38 @@ export default function AnalysisSidebar({ activeTarget = null, state }: Analysis
         if (identity !== requestIdentity.current || nextController.signal.aborted) return;
 
         if (analysisResult.status === "fulfilled" && analysisResult.value !== null) {
-          setAnalysis(analysisResult.value);
-          setStatus("current");
-          setAnalysisMessage(
-            "scenarios" in analysisResult.value
-              ? "Exact reference includes explicit model scenarios and a separate assumption-based deck-count summary."
-              : "Exact finite-shoe reference returned by Python.",
-          );
+          if (analysisResult.value.method === "exact_hand_summaries") {
+            setHandSummaries(analysisResult.value);
+            setAnalysis(null);
+            const available = "hands" in analysisResult.value
+              ? analysisResult.value.hands.some((hand) => hand.status === "complete")
+              : analysisResult.value.deck_count_summaries.some(
+                  (summary) => summary.status === "available",
+                );
+            setStatus(available ? "current" : "unavailable");
+            const firstError = "hands" in analysisResult.value
+              ? analysisResult.value.hands.find((hand) => hand.error)?.error
+              : analysisResult.value.deck_count_summaries.find(
+                  (summary) => summary.error,
+                )?.error;
+            setAnalysisMessage(
+              available
+                ? "All split-hand exact summaries returned by Python."
+                : firstError?.message ?? "Split-hand analysis is unavailable for the current state.",
+            );
+          } else {
+            setAnalysis(analysisResult.value);
+            setHandSummaries(null);
+            setStatus("current");
+            setAnalysisMessage(
+              "scenarios" in analysisResult.value
+                ? "Exact reference includes explicit model scenarios and a separate assumption-based deck-count summary."
+                : "Exact finite-shoe reference returned by Python.",
+            );
+          }
         } else if (analysisResult.status === "rejected") {
           setAnalysis(null);
+          setHandSummaries(null);
           setStatus("unavailable");
           const error = analysisResult.reason as unknown;
           setAnalysisMessage(
@@ -278,11 +412,14 @@ export default function AnalysisSidebar({ activeTarget = null, state }: Analysis
           );
         } else {
           setAnalysis(null);
+          setHandSummaries(null);
           setStatus("incomplete");
           setAnalysisMessage(
-            userHandCount > 1 && analysisHandId === null
-              ? "Select a specific primary hand to analyze its finite-shoe outcomes."
-              : "Waiting for two primary-hand cards and a dealer observation.",
+            hasSplitHands && analysisHandId === null
+              ? "The previous analysis target is no longer available. Select a split hand."
+              : hasSplitHands
+                ? "Waiting for a dealer observation and two cards on at least one split hand."
+                : "Waiting for two primary-hand cards and a dealer observation.",
           );
         }
 
@@ -299,13 +436,13 @@ export default function AnalysisSidebar({ activeTarget = null, state }: Analysis
           );
         }
       });
-    }, 220);
+    }, ANALYSIS_DEBOUNCE_MS);
 
     return () => {
       window.clearTimeout(timeout);
       controller.current?.abort();
     };
-  }, [analysisHandId, canRunExact, sessionStarted, state, userHandCount]);
+  }, [analysisHandId, canRunExact, canRunHandSummaries, hasSplitHands, sessionStarted, state]);
 
   useEffect(() => {
     forecastRequestIdentity.current += 1;
@@ -316,6 +453,7 @@ export default function AnalysisSidebar({ activeTarget = null, state }: Analysis
         state.configuration.userSeat === null || forecastHandId === null) {
       setForecastStatus(sessionStarted ? "incomplete" : "idle");
       setForecasts(null);
+      setForecastResultHandId(null);
       setForecastMessage(
         forecastHandId === null
           ? "Select a primary hand to calculate its hypothetical outcomes."
@@ -337,12 +475,14 @@ export default function AnalysisSidebar({ activeTarget = null, state }: Analysis
         .then((result) => {
           if (identity !== forecastRequestIdentity.current || nextController.signal.aborted) return;
           setForecasts(result);
+          setForecastResultHandId(forecastHandId);
           setForecastStatus("current");
           setForecastMessage("Exact hypothetical outcomes are current for the selected hand.");
         })
         .catch((error: unknown) => {
           if (identity !== forecastRequestIdentity.current || nextController.signal.aborted) return;
           setForecasts(null);
+          setForecastResultHandId(null);
           setForecastStatus("unavailable");
           setForecastMessage(
             error instanceof AnalysisApiError
@@ -350,7 +490,7 @@ export default function AnalysisSidebar({ activeTarget = null, state }: Analysis
               : "Hypothetical action forecasts are unavailable for the current state.",
           );
         });
-    }, 220);
+    }, ANALYSIS_DEBOUNCE_MS);
 
     return () => {
       window.clearTimeout(timeout);
@@ -366,16 +506,24 @@ export default function AnalysisSidebar({ activeTarget = null, state }: Analysis
   const aceInformation = scores
     .map((score) => score.ace_information)
     .find((item) => item !== null) ?? null;
+  const displayedForecasts = forecastResultHandId === forecastHandId
+    ? forecasts
+    : null;
   const statusText: Record<RequestStatus, string> = {
-    idle: "Awaiting table state",
+    idle: "No analysis target",
     updating: "Updating from Python…",
     current: "Analysis current",
-    incomplete: "Analysis needs more observations",
+    incomplete: "Awaiting required observations",
     unavailable: "Analysis unavailable",
   };
+  const proMode = workspaceMode === "pro";
 
   return (
-    <aside className="workspace-panel analysis-sidebar" aria-labelledby="analysis-sidebar-title">
+    <aside
+      className={`workspace-panel analysis-sidebar${proMode ? " analysis-sidebar--pro" : ""}`}
+      aria-labelledby="analysis-sidebar-title"
+      data-analysis-status={status}
+    >
       <div className="workspace-panel__heading">
         <div>
           <p className="eyebrow">Automatic interpretation</p>
@@ -389,13 +537,27 @@ export default function AnalysisSidebar({ activeTarget = null, state }: Analysis
         {statusText[status]}
       </div>
 
-      <section className="analysis-block exact-reference" aria-labelledby="exact-reference-title">
+      {hasSplitHands && state.configuration.userSeat !== null ? (
+        <SplitHandAnalysis
+          analysis={handSummaries}
+          hands={userHands}
+          message={analysisMessage}
+          onSelect={onSelectAnalysisTarget}
+          seat={state.configuration.userSeat}
+          selectedHandId={analysisHandId}
+          status={status}
+        />
+      ) : <section
+        className="analysis-block exact-reference"
+        aria-labelledby="exact-reference-title"
+        aria-busy={status === "updating"}
+      >
         <div className="analysis-block__title">
           <div><span className="analysis-kicker">Exact reference</span><h3 id="exact-reference-title">Finite-shoe outcomes</h3></div>
           <span className="method-badge">Exact</span>
         </div>
         {exact ? (
-          <dl className="probability-list">
+          <dl className={`probability-list${status === "updating" ? " analysis-results--updating" : ""}`}>
             <div className="probability probability--win"><dt>Win</dt><progress aria-label="Exact win probability" aria-valuetext={percentage(exact.outcomes.win)} max={1} value={exact.outcomes.win} /><dd>{percentage(exact.outcomes.win)}</dd></div>
             <div className="probability probability--push"><dt>Push</dt><progress aria-label="Exact push probability" aria-valuetext={percentage(exact.outcomes.push)} max={1} value={exact.outcomes.push} /><dd>{percentage(exact.outcomes.push)}</dd></div>
             <div className="probability probability--loss"><dt>Loss</dt><progress aria-label="Exact loss probability" aria-valuetext={percentage(exact.outcomes.loss)} max={1} value={exact.outcomes.loss} /><dd>{percentage(exact.outcomes.loss)}</dd></div>
@@ -403,7 +565,7 @@ export default function AnalysisSidebar({ activeTarget = null, state }: Analysis
         ) : exactScenarios && (exactScenarios.deck_count_summaries?.length ?? 0) > 0 ? (
           <ExactDeckSummary analysis={exactScenarios} />
         ) : <p className="calm-status">{analysisMessage}</p>}
-      </section>
+      </section>}
 
       <section
         className="analysis-block action-forecast"
@@ -420,42 +582,73 @@ export default function AnalysisSidebar({ activeTarget = null, state }: Analysis
         <p className="forecast-explanation">
           These are modeled outcomes for separate hypothetical actions on the selected hand.
         </p>
-        {forecastStatus === "updating" ? (
-          <p className="calm-status" role="status">Calculating exact hypothetical outcomes...</p>
-        ) : forecasts && "action_forecasts" in forecasts ? (
-          <div className="forecast-list">
-            <ForecastOutcomes
-              forecast={forecasts.action_forecasts.stand_now}
-              label="Stand now"
-            />
-            <ForecastOutcomes
-              forecast={forecasts.action_forecasts.hit_once_then_stand}
-              label="Hit once, then stand"
-            />
-            <ForecastOutcomes
-              forecast={forecasts.action_forecasts.double_one_card_then_stand}
-              label="Double — one card, then stand"
-            />
-            <TerminalForecast
-              forecast={forecasts.action_forecasts.surrender_now}
-            />
-            <SplitForecast
-              forecast={forecasts.action_forecasts.split_one_card_each_then_stand}
-            />
+        {displayedForecasts && "action_forecasts" in displayedForecasts ? (
+          <div className={`action-forecast__results${forecastStatus === "updating" ? " analysis-results--updating" : ""}`}>
+            <div className="forecast-list">
+              <ForecastOutcomes
+                forecast={displayedForecasts.action_forecasts.stand_now}
+                label="Stand now"
+              />
+              <ForecastOutcomes
+                forecast={displayedForecasts.action_forecasts.hit_once_then_stand}
+                label="Hit once, then stand"
+              />
+              <ForecastOutcomes
+                forecast={displayedForecasts.action_forecasts.double_one_card_then_stand}
+                label="Double — one card, then stand"
+              />
+              <TerminalForecast
+                forecast={displayedForecasts.action_forecasts.surrender_now}
+              />
+              <SplitForecast
+                forecast={displayedForecasts.action_forecasts.split_one_card_each_then_stand}
+              />
+            </div>
+            {forecastStatus === "updating" && (
+              <p className="calm-status" role="status">Updating exact hypothetical outcomes; previous values remain visible.</p>
+            )}
           </div>
-        ) : forecasts ? (
-          <ActionDeckSummaries forecasts={forecasts} />
+        ) : displayedForecasts ? (
+          <div className={forecastStatus === "updating" ? "analysis-results--updating" : undefined}>
+            <ActionDeckSummaries forecasts={displayedForecasts} />
+            {forecastStatus === "updating" && (
+              <p className="calm-status" role="status">Updating exact hypothetical outcomes; previous values remain visible.</p>
+            )}
+          </div>
+        ) : forecastStatus === "updating" ? (
+          <p className="calm-status" role="status">Calculating exact hypothetical outcomes...</p>
         ) : (
           <p className="calm-status">{forecastMessage}</p>
         )}
       </section>
 
-      <section className="analysis-block research-current" aria-labelledby="research-current-title">
+      <section
+        className={`analysis-block research-current${status === "updating" && research ? " analysis-results--updating" : ""}`}
+        aria-labelledby="research-current-title"
+        aria-busy={status === "updating"}
+      >
         <div className="analysis-block__title">
           <div><span className="analysis-kicker">Source-backed</span><h3 id="research-current-title">Research systems</h3></div>
         </div>
-        <p className="research-interpretation-note">Raw research scores summarize source-backed observed-card weights. They are not probabilities or action instructions.</p>
-        {scores.length > 0 && <>
+        {!proMode && <p className="research-interpretation-note">Raw research scores summarize source-backed observed-card weights. They are not probabilities or action instructions.</p>}
+        {scores.length > 0 && (proMode ? <>
+          <ResearchSystemSummaryRows scores={scores} />
+          <details className="research-details-disclosure">
+            <summary>Research details</summary>
+            <p className="research-interpretation-note">Raw research scores summarize source-backed observed-card weights. They are not probabilities or action instructions.</p>
+            <p className="forecast-note">Ace Information is a separate auxiliary research feature, not a fourth primary counting system.</p>
+            <ResearchSystemCards
+              scores={scores}
+              exactOutcomes={exact?.outcomes ?? null}
+              deckSummaries={exactScenarios?.deck_count_summaries ?? []}
+              unavailableMessage={analysisMessage}
+            />
+          </details>
+          <details className="research-comparison-disclosure">
+            <summary>Compare systems</summary>
+            <ResearchComparisonTable scores={scores} />
+          </details>
+        </> : <>
           <ResearchSystemCards
             scores={scores}
             exactOutcomes={exact?.outcomes ?? null}
@@ -463,13 +656,13 @@ export default function AnalysisSidebar({ activeTarget = null, state }: Analysis
             unavailableMessage={analysisMessage}
           />
           <ResearchComparisonTable scores={scores} />
-        </>}
+        </>)}
         {!research && <p className="calm-status">{researchMessage}</p>}
       </section>
 
       <section className="analysis-block ace-information" aria-labelledby="ace-information-title">
         <div className="analysis-block__title"><div><span className="analysis-kicker">Auxiliary feature</span><h3 id="ace-information-title">Ace Information</h3></div></div>
-        <p className="forecast-note">Separate auxiliary research information, not a fourth primary counting system.</p>
+        {!proMode && <p className="forecast-note">Separate auxiliary research information, not a fourth primary counting system.</p>}
         {aceInformation ? (
           <dl className="ace-facts">
             <div><dt>Known aces observed</dt><dd>{aceInformation.known_aces_observed}</dd></div>

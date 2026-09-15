@@ -73,6 +73,7 @@ def exact_micro_state() -> dict[str, object]:
 
 def test_each_approved_primary_definition_is_selectable() -> None:
     expected = {
+        "hi_lo": 0.0,
         "wong_halves": -0.5,
         "zen_count": 0.0,
         "omega_ii": 1.0,
@@ -94,17 +95,18 @@ def test_each_approved_primary_definition_is_selectable() -> None:
 def test_multiple_systems_preserve_order_and_distinct_scores() -> None:
     response = client.post(
         "/api/research/compare",
-        json=request_for(["omega_ii", "wong_halves", "zen_count"]),
+        json=request_for(["hi_lo", "omega_ii", "wong_halves", "zen_count"]),
     )
 
     assert response.status_code == 200
     scores = response.json()["scores"]
     assert [item["definition"]["identifier"] for item in scores] == [
+        "hi_lo",
         "omega_ii",
         "wong_halves",
         "zen_count",
     ]
-    assert [item["raw_score"] for item in scores] == [1.0, -0.5, 0.0]
+    assert [item["raw_score"] for item in scores] == [0.0, 1.0, -0.5, 0.0]
 
 
 def test_fractional_source_scale_survives_api_transport() -> None:
@@ -123,6 +125,31 @@ def test_fractional_source_scale_survives_api_transport() -> None:
     assert "probability" not in score
     assert "advantage" not in score
     assert "confidence" not in score
+
+
+def test_hi_lo_definition_transport_is_source_backed_and_canonical() -> None:
+    response = client.post(
+        "/api/research/compare", json=request_for(["hi_lo"])
+    )
+
+    assert response.status_code == 200
+    definition = response.json()["scores"][0]["definition"]
+    assert definition["canonical_tags"] == [
+        {"card_value": rank, "tag_fraction": str(tag), "tag_decimal": float(tag)}
+        for rank, tag in zip(
+            RANKS,
+            (-1, 1, 1, 1, 1, 1, 0, 0, 0, -1, -1, -1, -1),
+            strict=True,
+        )
+    ]
+    assert definition["published_metrics"] == {
+        "kind": "published_static_metadata",
+        "pe": 0.51,
+        "bc": 0.97,
+        "ic": 0.76,
+    }
+    assert definition["balanced"] is True
+    assert definition["level"] == 1
 
 
 def test_source_and_published_metrics_are_descriptive_metadata() -> None:
@@ -203,7 +230,7 @@ def test_unknown_ace_inventory_is_incomplete_without_affecting_score() -> None:
     assert score["ace_information"]["complete"] is False
 
 
-@pytest.mark.parametrize("definition_id", ("ace_information", "hi_lo", "missing"))
+@pytest.mark.parametrize("definition_id", ("ace_information", "missing"))
 def test_non_primary_or_unsupported_definition_is_rejected(
     definition_id: str,
 ) -> None:

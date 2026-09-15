@@ -143,6 +143,38 @@ def _tags(values: tuple[Fraction, ...]) -> tuple[tuple[Rank, Fraction], ...]:
     return tuple(zip(tuple(Rank), expanded, strict=True))
 
 
+HI_LO = ResearchDefinition(
+    identifier="hi_lo",
+    label="Hi-Lo",
+    tags=_tags(
+        (
+            Fraction(-1),
+            Fraction(1),
+            Fraction(1),
+            Fraction(1),
+            Fraction(1),
+            Fraction(1),
+            Fraction(0),
+            Fraction(0),
+            Fraction(0),
+            Fraction(-1),
+        )
+    ),
+    balanced=True,
+    level=1,
+    ace_classification=AceClassification.RECKONED,
+    source=_source(
+        "Comparison and technical baseline table; "
+        "System-by-system source guide: Hi-Lo"
+    ),
+    published_metrics=PublishedResearchMetrics(
+        playing_efficiency=Decimal("0.51"),
+        betting_correlation=Decimal("0.97"),
+        insurance_correlation=Decimal("0.76"),
+    ),
+)
+
+
 WONG_HALVES = ResearchDefinition(
     identifier="wong_halves",
     label="Wong Halves",
@@ -237,6 +269,7 @@ OMEGA_II = ResearchDefinition(
 )
 
 APPROVED_PRIMARY_DEFINITIONS: tuple[ResearchDefinition, ...] = (
+    HI_LO,
     WONG_HALVES,
     ZEN_COUNT,
     OMEGA_II,

@@ -85,6 +85,57 @@ describe("frontend session and event model", () => {
     expect(selectUnknownCardCount(state)).toBe(1);
   });
 
+  it("derives value-only observations for dealer and player targets", () => {
+    let state = startSession();
+    state = gameReducer(state, {
+      type: "DEAL_VALUE_CARD",
+      target: { kind: "dealer" },
+      card: { kind: "value", value: "10" },
+    });
+    state = gameReducer(state, {
+      type: "DEAL_VALUE_CARD",
+      target: { kind: "player", seat: 2 },
+      card: { kind: "value", value: "A" },
+    });
+
+    const table = selectTableState(state);
+    expect(table.dealerCards).toEqual([{ kind: "value", value: "10" }]);
+    expect(table.playerHands[2][0].cards).toEqual([{ kind: "value", value: "A" }]);
+    expect(state.events.slice(-2).map((event) => event.type)).toEqual([
+      "DEAL_VALUE_CARD",
+      "DEAL_VALUE_CARD",
+    ]);
+  });
+
+  it("undoes mixed exact, value-only, and unknown observations in chronology order", () => {
+    let state = gameReducer(startSession(), {
+      type: "DEAL_KNOWN_CARD",
+      target: { kind: "dealer" },
+      card: { kind: "known", rank: "Q", suit: "hearts" },
+    });
+    state = gameReducer(state, {
+      type: "DEAL_VALUE_CARD",
+      target: { kind: "dealer" },
+      card: { kind: "value", value: "10" },
+    });
+    state = gameReducer(state, {
+      type: "DEAL_UNKNOWN_CARD",
+      target: { kind: "dealer" },
+    });
+
+    state = gameReducer(state, { type: "UNDO" });
+    expect(selectTableState(state).dealerCards).toEqual([
+      { kind: "known", rank: "Q", suit: "hearts" },
+      { kind: "value", value: "10" },
+    ]);
+    state = gameReducer(state, { type: "UNDO" });
+    expect(selectTableState(state).dealerCards).toEqual([
+      { kind: "known", rank: "Q", suit: "hearts" },
+    ]);
+    state = gameReducer(state, { type: "UNDO" });
+    expect(selectTableState(state).dealerCards).toEqual([]);
+  });
+
   it("undoes the latest recorded event deterministically", () => {
     const withCard = gameReducer(startSession(), {
       type: "DEAL_UNKNOWN_CARD",

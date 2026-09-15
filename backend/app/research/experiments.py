@@ -143,6 +143,11 @@ def _require_eligible_base_state(state: ReconstructedTableState, removed: int) -
             "batch_requires_resolved_composition",
             "Batch experiments require a fully resolved remaining composition.",
         )
+    if state.game_state.shoe.has_value_only_removals:
+        raise ExperimentValidationError(
+            "batch_requires_exact_composition",
+            "Batch rank-sampling experiments require exact-rank composition.",
+        )
     users = tuple(player for player in state.players if player.is_user)
     if len(users) != 1:
         raise ExperimentValidationError(
@@ -183,10 +188,10 @@ def generate_batch_experiment(
         raise ExperimentValidationError(
             "missing_research_definition", "Select at least one research definition."
         )
-    if len(definitions) > 3:
+    if len(definitions) > 4:
         raise ExperimentValidationError(
             "too_many_research_definitions",
-            "Select no more than three research definitions.",
+            "Select no more than four research definitions.",
         )
     definition_ids = tuple(definition.identifier for definition in definitions)
     if len(definition_ids) != len(set(definition_ids)):

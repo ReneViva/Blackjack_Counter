@@ -1,7 +1,18 @@
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
-from app.domain import ALL_CARDS, Card, Rank, RoundPhase, RoundState, Shoe
+from app.domain import (
+    ALL_CARDS,
+    BlackjackValueClass,
+    Card,
+    Rank,
+    RoundPhase,
+    RoundState,
+    Shoe,
+    UnknownCard,
+    ValueOnlyCard,
+    to_blackjack_value_class,
+)
 from app.engine import (
     DealerStatus,
     advance_dealer,
@@ -36,11 +47,12 @@ class ExactAnalysisError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class PossibleDraw:
-    rank: Rank
+    rank: Rank | None
+    value: BlackjackValueClass
     count: int
     total: int
     probability: float
-    card: Card
+    card: Card | ValueOnlyCard
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,7 +213,7 @@ def _require_known_state(state: RoundState, target_hand_index: int) -> None:
             "Exact analysis requires every removed card identity to be resolved.",
         )
     if any(
-        not isinstance(card, Card)
+        isinstance(card, UnknownCard)
         for hand in (state.game_state.dealer_hand, *state.game_state.player_hands)
         for card in hand.cards
     ):
@@ -234,6 +246,22 @@ def possible_draws(shoe: Shoe) -> tuple[PossibleDraw, ...]:
         return ()
 
     draws: list[PossibleDraw] = []
+    if shoe.has_value_only_removals:
+        for value, count in shoe.value_composition:
+            if count == 0:
+                continue
+            draws.append(
+                PossibleDraw(
+                    rank=None,
+                    value=value,
+                    count=count,
+                    total=total,
+                    probability=count / total,
+                    card=ValueOnlyCard(value),
+                )
+            )
+        return tuple(draws)
+
     counts = shoe.card_counts
     for rank, slots in _RANK_DRAW_SLOTS:
         count = sum(counts[index] for index, _ in slots)
@@ -243,6 +271,7 @@ def possible_draws(shoe: Shoe) -> tuple[PossibleDraw, ...]:
         draws.append(
             PossibleDraw(
                 rank=rank,
+                value=to_blackjack_value_class(rank),
                 count=count,
                 total=total,
                 probability=count / total,

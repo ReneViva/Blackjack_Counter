@@ -12,6 +12,7 @@ from .count_engine import (
 from .definitions import (
     ACE_INFORMATION,
     APPROVED_PRIMARY_DEFINITIONS,
+    HI_LO,
     OMEGA_II,
     SOURCE_ID,
     SOURCE_PATH,
@@ -57,6 +58,7 @@ __all__ = [
     "AceInformationResult",
     "BatchExperiment",
     "EXPERIMENT_VERSION",
+    "HI_LO",
     "ExactReferenceResult",
     "ExperimentCase",
     "ExperimentValidationError",

@@ -145,6 +145,16 @@ export function selectTableState(state: SessionState): DerivedTableState {
       continue;
     }
 
+    if (event.type === "DEAL_VALUE_CARD") {
+      if (event.target.kind === "dealer") {
+        dealerCards.push(event.card);
+      } else {
+        const hand = handForTarget(playerHands, event.target);
+        if (hand) (hand.cards as ObservedCard[]).push(event.card);
+      }
+      continue;
+    }
+
     if (event.type === "DEAL_UNKNOWN_CARD") {
       const unknownCard = { kind: "unknown" } as const;
       if (event.target.kind === "dealer") {

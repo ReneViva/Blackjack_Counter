@@ -50,6 +50,7 @@ const definition = {
   balanced: true,
   level: 3,
   ace_classification: "ace_reckoned" as const,
+  canonical_tags: [],
   source: {
     source_id: "approved-source",
     title: "Approved package",

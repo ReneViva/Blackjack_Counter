@@ -38,6 +38,14 @@ export default function HandPanel({
                 {card.rank}
                 {SUIT_SYMBOLS[card.suit]}
               </span>
+            ) : card.kind === "value" ? (
+              <span
+                className="playing-card"
+                key={`value-${card.value}-${index}`}
+                aria-label={`${card.value} value card`}
+              >
+                {card.value}
+              </span>
             ) : (
               <span
                 className="playing-card playing-card--unknown"

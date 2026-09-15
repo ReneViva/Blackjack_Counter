@@ -4,6 +4,7 @@ import pytest
 
 from app.domain import (
     ALL_CARDS,
+    BlackjackValueClass,
     Card,
     DealerCheckResult,
     DealerSoft17,
@@ -18,6 +19,7 @@ from app.domain import (
     Shoe,
     Suit,
     UnknownCard,
+    ValueOnlyCard,
 )
 from app.engine import advance_dealer
 from app.probability import (
@@ -197,3 +199,50 @@ def test_latent_or_unknown_state_is_rejected() -> None:
     with pytest.raises(ExactAnalysisError) as unknown_error:
         evaluate_exact_reference(unknown_state)
     assert unknown_error.value.code == "exact_analysis_requires_resolved_hidden_composition"
+
+
+def test_value_only_shoe_draws_use_value_composition_without_fake_rank() -> None:
+    shoe = Shoe(
+        decks=1,
+        card_counts=(1,) * 52,
+        value_only_removed_counts=(3, 4, 4, 4, 4, 4, 4, 4, 4, 15),
+    )
+
+    draws = possible_draws(shoe)
+
+    assert [(draw.value, draw.count, draw.probability) for draw in draws] == [
+        (BlackjackValueClass.ACE, 1, 0.5),
+        (BlackjackValueClass.TEN, 1, 0.5),
+    ]
+    assert all(draw.rank is None for draw in draws)
+    assert all(isinstance(draw.card, ValueOnlyCard) for draw in draws)
+
+
+def test_value_only_draw_depletes_shared_shoe_by_value() -> None:
+    shoe = Shoe(
+        decks=1,
+        card_counts=(1,) * 52,
+        value_only_removed_counts=(4, 4, 4, 4, 4, 4, 4, 4, 3, 16),
+    )
+    state = dealer_round(
+        player_cards=(
+            ValueOnlyCard(BlackjackValueClass.TEN),
+            ValueOnlyCard(BlackjackValueClass.NINE),
+        ),  # type: ignore[arg-type]
+        dealer_cards=(
+            ValueOnlyCard(BlackjackValueClass.SIX),
+            ValueOnlyCard(BlackjackValueClass.TEN),
+        ),  # type: ignore[arg-type]
+        shoe=shoe,
+    )
+    draw = possible_draws(shoe)[0]
+
+    successor = advance_dealer(state, draw.card)
+
+    assert draw.value is BlackjackValueClass.NINE
+    assert successor.game_state.shoe.value_count(BlackjackValueClass.NINE) == 0
+    assert successor.game_state.shoe.total_cards == 0
+    assert all(
+        successor.game_state.shoe.count(card) == shoe.count(card)
+        for card in ALL_CARDS
+    )
