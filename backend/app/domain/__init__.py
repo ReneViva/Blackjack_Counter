@@ -8,6 +8,8 @@ from .card import (
     Suit,
     UnknownCard,
     ValueOnlyCard,
+    is_known_exact_pair,
+    known_rank_for_observation,
     to_blackjack_value_class,
 )
 from .hand import Hand
@@ -53,6 +55,8 @@ __all__ = [
     "RoundPhase",
     "RoundState",
     "initial_hand_id",
+    "is_known_exact_pair",
+    "known_rank_for_observation",
     "split_child_hand_ids",
     "Shoe",
     "Suit",

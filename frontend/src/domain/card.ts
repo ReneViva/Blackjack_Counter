@@ -57,3 +57,16 @@ export type ObservedCard = CardObservation;
 export function blackjackValueClassForRank(rank: Rank): BlackjackValueClass {
   return rank === "J" || rank === "Q" || rank === "K" ? "10" : rank;
 }
+
+export function knownRankForObservation(card: ObservedCard): Rank | null {
+  if (card.kind === "known") return card.rank;
+  if (card.kind === "value" && card.value !== "10") return card.value;
+  return null;
+}
+
+export function isKnownExactPair(cards: readonly ObservedCard[]): boolean {
+  if (cards.length !== 2) return false;
+  const left = knownRankForObservation(cards[0]);
+  const right = knownRankForObservation(cards[1]);
+  return left !== null && left === right;
+}

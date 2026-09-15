@@ -1,4 +1,5 @@
 import type { GameEvent, RecordedTableTarget, SessionAction } from "../domain/events";
+import { isKnownExactPair, knownRankForObservation } from "../domain/card";
 import type { SessionConfiguration } from "../domain/game";
 import { initialHandId, splitChildHandIds } from "../domain/hands";
 import { createInitialState } from "./initialState";
@@ -44,7 +45,6 @@ function configurationFromChronology(
 ): SessionConfiguration {
   const shoe = events.find((event) => event.type === "NEW_SHOE");
   let configuration = shoe?.type === "NEW_SHOE" ? shoe.configuration : fallback;
-  let departureSeen = false;
   for (const event of events) {
     if (event.type === "PLAYER_ADDED") {
       configuration = {
@@ -52,14 +52,9 @@ function configurationFromChronology(
         activeSeats: [...configuration.activeSeats, event.seat]
           .filter((seat, index, seats) => seats.indexOf(seat) === index)
           .sort((left, right) => left - right),
-        userSeat: configuration.userSeat ?? (
-          configuration.activeSeats.length === 0 && !departureSeen
-            ? event.seat
-            : null
-        ),
+        userSeat: configuration.userSeat ?? event.seat,
       };
     } else if (event.type === "PLAYER_LEFT") {
-      departureSeen = true;
       configuration = {
         ...configuration,
         activeSeats: configuration.activeSeats.filter(
@@ -110,12 +105,7 @@ export function gameReducer(
         configuration: {
           ...started.configuration,
           activeSeats,
-          userSeat: started.configuration.userSeat ?? (
-            started.configuration.activeSeats.length === 0 &&
-            !started.events.some((event) => event.type === "PLAYER_LEFT")
-              ? action.seat
-              : null
-          ),
+          userSeat: started.configuration.userSeat ?? action.seat,
         },
       }, { type: "PLAYER_ADDED", seat: action.seat });
     }
@@ -126,11 +116,9 @@ export function gameReducer(
       );
       if (!source || source.cards.length !== 2) return state;
       const [expectedLeft, expectedRight] = splitChildHandIds(source.handId);
-      const exactPair = source.cards[0].kind === "known" &&
-        source.cards[1].kind === "known" &&
-        source.cards[0].rank === source.cards[1].rank;
+      const exactPair = isKnownExactPair(source.cards);
       const fromSplitAces = source.fromSplitAces || (
-        source.cards[0].kind === "known" && source.cards[0].rank === "A"
+        knownRankForObservation(source.cards[0]) === "A"
       );
       if (!exactPair ||
           action.leftHandId !== expectedLeft ||
@@ -199,7 +187,7 @@ export function gameReducer(
       };
     }
     case "RESET":
-      return createInitialState();
+      return createInitialState(action.configuration);
     case "IMPORT_REPLAY":
       return {
         configuration: action.configuration,

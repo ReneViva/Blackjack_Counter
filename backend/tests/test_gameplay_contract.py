@@ -151,6 +151,21 @@ def test_value_only_pair_does_not_invent_exact_rank_for_split_legality() -> None
     assert decision.code == "exact_pair_required"
 
 
+def test_unambiguous_value_only_pair_executes_split_without_inventing_identity() -> None:
+    six = ValueOnlyCard(BlackjackValueClass.SIX)
+    original = start_round(make_game(players=(Hand(cards=(six, six)),)))
+
+    split = player_split(original)
+
+    assert tuple(hand.hand.cards for hand in split.player_hands) == ((six,), (six,))
+    assert tuple(hand.hand_id for hand in split.player_hands) == (
+        "seat-1-hand-1-1",
+        "seat-1-hand-1-2",
+    )
+    assert all(hand.parent_hand_id == "seat-1-hand-1" for hand in split.player_hands)
+    assert split.game_state.shoe == original.game_state.shoe
+
+
 def test_extended_rule_defaults_and_transport_compatibility() -> None:
     domain = Rules(1, DealerSoft17.STAND)
     transport = RulesSchema.model_validate(

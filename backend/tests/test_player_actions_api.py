@@ -1,5 +1,6 @@
 from copy import deepcopy
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -10,6 +11,10 @@ client = TestClient(app)
 
 def known(rank: str, suit: str) -> dict[str, str]:
     return {"kind": "known", "rank": rank, "suit": suit}
+
+
+def value(card_value: str) -> dict[str, str]:
+    return {"kind": "value", "value": card_value}
 
 
 def payload(
@@ -64,6 +69,28 @@ def test_split_legality_accepts_an_exact_rank_pair() -> None:
     result = split_result(payload([known("8", "H"), known("8", "C")]))
 
     assert result == {"allowed": True, "code": None, "reason": None}
+
+
+@pytest.mark.parametrize(
+    ("cards", "allowed"),
+    (
+        ([value("6"), value("6")], True),
+        ([value("A"), value("A")], True),
+        ([known("6", "S"), value("6")], True),
+        ([value("6"), value("7")], False),
+        ([value("10"), value("10")], False),
+        ([known("Q", "S"), known("Q", "H")], True),
+        ([known("Q", "S"), value("10")], False),
+        ([known("10", "S"), known("J", "H")], False),
+    ),
+)
+def test_split_legality_uses_only_unambiguous_exact_rank_identity(
+    cards: list[dict[str, str]], allowed: bool
+) -> None:
+    result = split_result(payload(cards))
+
+    assert result["allowed"] is allowed
+    assert result["code"] is None if allowed else result["code"] == "exact_pair_required"
 
 
 def test_split_legality_enforces_enabled_and_exact_rank_rules() -> None:

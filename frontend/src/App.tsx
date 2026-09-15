@@ -14,6 +14,11 @@ import SetupPage from "./pages/SetupPage";
 import TablePage from "./pages/TablePage";
 import { gameReducer, type SessionState } from "./state/gameReducer";
 import { createInitialState } from "./state/initialState";
+import { DEFAULT_CONFIGURATION } from "./state/initialState";
+import {
+  loadDevicePreferences,
+  saveDevicePreferences,
+} from "./state/preferences";
 import {
   browserSessionPersistence,
   SessionPersistenceError,
@@ -34,12 +39,23 @@ type InitialSession = Readonly<{
   notice: PersistenceNotice | null;
 }>;
 
+function freshSession() {
+  const preferredDeckCount = loadDevicePreferences().preferredDeckCount;
+  return createInitialState({
+    ...DEFAULT_CONFIGURATION,
+    rules: {
+      ...DEFAULT_CONFIGURATION.rules,
+      decks: preferredDeckCount ?? DEFAULT_CONFIGURATION.rules.decks,
+    },
+  });
+}
+
 function initializeSession(): InitialSession {
   try {
     const restored = browserSessionPersistence.load();
     return restored === null
       ? {
-          session: createInitialState(),
+          session: freshSession(),
           restored: false,
           removeCorruptStorage: false,
           notice: null,
@@ -57,7 +73,7 @@ function initializeSession(): InitialSession {
   } catch (error: unknown) {
     const persistenceError = error instanceof SessionPersistenceError ? error : null;
     return {
-      session: createInitialState(),
+      session: freshSession(),
       restored: false,
       removeCorruptStorage: persistenceError?.definitiveCorruption ?? false,
       notice: {
@@ -186,7 +202,7 @@ export default function App() {
 
   const newSession = () => {
     if (sessionStarted && !window.confirm("Start a new empty session? The current event chronology will be cleared.")) return;
-    dispatch({ type: "RESET" });
+    dispatch({ type: "RESET", configuration: freshSession().configuration });
   };
 
   const closeSettings = () => setSettingsOpen(false);
@@ -279,7 +295,16 @@ export default function App() {
             <SetupPage
               configuration={session.configuration}
               disabled={sessionStarted}
-              onChange={(configuration) => dispatch({ type: "CONFIGURE_SESSION", configuration })}
+              onChange={(configuration) => {
+                if (configuration.rules.decks !== null &&
+                    configuration.rules.decks !== session.configuration.rules.decks) {
+                  saveDevicePreferences({
+                    ...loadDevicePreferences(),
+                    preferredDeckCount: configuration.rules.decks,
+                  });
+                }
+                dispatch({ type: "CONFIGURE_SESSION", configuration });
+              }}
               onStart={() => {
                 dispatch({ type: "NEW_SHOE" });
                 closeSettings();

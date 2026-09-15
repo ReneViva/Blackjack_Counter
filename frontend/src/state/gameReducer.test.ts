@@ -40,6 +40,50 @@ describe("frontend session and event model", () => {
     expect(added.events.at(-1)).toMatchObject({ id: "evt_0002", sequence: 2, seat: 4 });
   });
 
+  it("leaves PRIMARY unassigned until the next explicit join", () => {
+    const configuration: SessionConfiguration = {
+      rules: DEFAULT_RULES,
+      activeSeats: [3, 4, 5],
+      userSeat: 5,
+    };
+    let state = gameReducer(createInitialState(configuration), { type: "NEW_SHOE" });
+
+    state = gameReducer(state, { type: "LEAVE_PLAYER", seat: 5 });
+    expect(state.configuration.activeSeats).toEqual([3, 4]);
+    expect(state.configuration.userSeat).toBeNull();
+
+    state = gameReducer(state, { type: "ADD_PLAYER", seat: 1 });
+    expect(state.configuration.activeSeats).toEqual([1, 3, 4]);
+    expect(state.configuration.userSeat).toBe(1);
+
+    state = gameReducer(state, { type: "ADD_PLAYER", seat: 2 });
+    expect(state.configuration.userSeat).toBe(1);
+    expect(state.configuration.activeSeats.filter(
+      (seat) => seat === state.configuration.userSeat,
+    )).toHaveLength(1);
+  });
+
+  it("leaving a non-primary seat never changes PRIMARY", () => {
+    let state = gameReducer(createInitialState(), { type: "ADD_PLAYER", seat: 5 });
+    state = gameReducer(state, { type: "ADD_PLAYER", seat: 3 });
+    state = gameReducer(state, { type: "LEAVE_PLAYER", seat: 3 });
+
+    expect(state.configuration.activeSeats).toEqual([5]);
+    expect(state.configuration.userSeat).toBe(5);
+  });
+
+  it("reconstructs zero and reassigned PRIMARY states deterministically through undo", () => {
+    let state = gameReducer(createInitialState(), { type: "ADD_PLAYER", seat: 5 });
+    state = gameReducer(state, { type: "ADD_PLAYER", seat: 3 });
+    state = gameReducer(state, { type: "LEAVE_PLAYER", seat: 5 });
+    const withoutPrimary = state;
+    state = gameReducer(state, { type: "ADD_PLAYER", seat: 1 });
+    expect(state.configuration.userSeat).toBe(1);
+
+    expect(gameReducer(state, { type: "UNDO" })).toEqual(withoutPrimary);
+    expect(gameReducer(withoutPrimary, { type: "UNDO" }).configuration.userSeat).toBe(5);
+  });
+
   it("undoes a player-add event without leaving a phantom active seat", () => {
     const added = gameReducer(createInitialState(), { type: "ADD_PLAYER", seat: 4 });
     const undone = gameReducer(added, { type: "UNDO" });

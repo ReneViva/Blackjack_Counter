@@ -80,6 +80,31 @@ describe("multi-hand session chronology", () => {
     expect(next.events.at(-1)?.type).toBe("PLAYER_HAND_SPLIT");
   });
 
+  it("partitions value-only sixes through chronology and Undo without inventing rank or suit", () => {
+    let original = gameReducer(createInitialState(), { type: "ADD_PLAYER", seat: 4 });
+    for (let index = 0; index < 2; index += 1) {
+      original = gameReducer(original, {
+        type: "DEAL_VALUE_CARD",
+        target: { kind: "player", seat: 4 },
+        card: { kind: "value", value: "6" },
+      });
+    }
+
+    const next = split(original);
+    const hands = selectTableState(next).playerHands[4];
+    expect(hands.map((hand) => hand.cards)).toEqual([
+      [{ kind: "value", value: "6" }],
+      [{ kind: "value", value: "6" }],
+    ]);
+    expect(hands.map((hand) => hand.handId)).toEqual([
+      "seat-4-hand-1-1",
+      "seat-4-hand-1-2",
+    ]);
+    expect(next.events.at(-1)?.type).toBe("PLAYER_HAND_SPLIT");
+    expect(selectObservedCardCount(next)).toBe(2);
+    expect(gameReducer(next, { type: "UNDO" })).toEqual(original);
+  });
+
   it("targets replacement observations to one exact hand and supports resplit lineage", () => {
     let state = split(pairedSeat());
     state = dealTo(state, "seat-4-hand-1-1", eightSpades);
@@ -201,7 +226,7 @@ describe("multi-hand session chronology", () => {
       cards: [],
     }]);
     expect(table.discardedCards).toHaveLength(4);
-    expect(state.configuration.userSeat).toBeNull();
+    expect(state.configuration.userSeat).toBe(4);
   });
 
   it("undoes leave and split with exact deterministic structure and counts", () => {

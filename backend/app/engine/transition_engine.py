@@ -21,6 +21,8 @@ from app.domain import (
     Shoe,
     UnknownCard,
     ValueOnlyCard,
+    is_known_exact_pair,
+    known_rank_for_observation,
     to_blackjack_value_class,
     initial_hand_id,
     split_child_hand_ids,
@@ -574,9 +576,8 @@ def _split_child_status(
             rules.resplit_aces
             and seat_hand_count < rules.max_split_hands
             and len(cards) == 2
-            and all(isinstance(card, Card) for card in cards)
-            and cards[0].rank is Rank.ACE
-            and cards[1].rank is Rank.ACE
+            and is_known_exact_pair(cards)
+            and known_rank_for_observation(cards[0]) is Rank.ACE
         )
         if can_resplit:
             return HandStatus.ACTIVE
@@ -595,9 +596,8 @@ def player_split(
     index = _require_player_action(state, PlayerAction.SPLIT)
     parent = state.player_hands[index]
     left_card, right_card = parent.hand.cards
-    assert isinstance(left_card, Card) and isinstance(right_card, Card)
     depth = parent.split_depth + 1
-    split_aces = left_card.rank is Rank.ACE
+    split_aces = known_rank_for_observation(left_card) is Rank.ACE
     assert parent.hand_id is not None
     left_id, right_id = split_child_hand_ids(parent.hand_id)
     left = PlayerHandState(

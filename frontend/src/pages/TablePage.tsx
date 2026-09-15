@@ -15,6 +15,8 @@ import {
 } from "../api/playerActions";
 import type { SessionAction, TableTarget } from "../domain/events";
 import type { WorkspaceMode } from "../domain/workspace";
+import { knownRankForObservation } from "../domain/card";
+import { loadDevicePreferences, saveDevicePreferences } from "../state/preferences";
 import type { SessionState } from "../state/gameReducer";
 import { splitChildHandIds } from "../domain/hands";
 import { selectTableState } from "../state/selectors";
@@ -25,7 +27,9 @@ type TablePageProps = Readonly<{
 }>;
 
 export default function TablePage({ dispatch, state }: TablePageProps) {
-  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("normal");
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(
+    () => loadDevicePreferences().workspaceMode,
+  );
   const [activeTarget, setActiveTarget] = useState<TableTarget | null>(null);
   const [analysisTarget, setAnalysisTarget] = useState<Extract<
     TableTarget,
@@ -164,8 +168,8 @@ export default function TablePage({ dispatch, state }: TablePageProps) {
                 if (!source) return;
                 const [leftHandId, rightHandId] = splitChildHandIds(source.handId);
                 const fromSplitAces = source.fromSplitAces || (
-                  source.cards[0]?.kind === "known" &&
-                  source.cards[0].rank === "A"
+                  source.cards[0] !== undefined &&
+                  knownRankForObservation(source.cards[0]) === "A"
                 );
                 dispatch({
                   type: "SPLIT_PLAYER_HAND",
@@ -260,7 +264,13 @@ export default function TablePage({ dispatch, state }: TablePageProps) {
           onValueCard={(target, card) =>
             dispatch({ type: "DEAL_VALUE_CARD", target, card })
           }
-          onWorkspaceModeChange={setWorkspaceMode}
+          onWorkspaceModeChange={(mode) => {
+            setWorkspaceMode(mode);
+            saveDevicePreferences({
+              ...loadDevicePreferences(),
+              workspaceMode: mode,
+            });
+          }}
           table={table}
           workspaceMode={workspaceMode}
         />

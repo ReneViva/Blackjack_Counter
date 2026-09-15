@@ -6,6 +6,7 @@ import { toTableStatePayload } from "../api/tableState";
 import { splitChildHandIds } from "../domain/hands";
 import { gameReducer, type SessionState } from "../state/gameReducer";
 import { createInitialState } from "../state/initialState";
+import { DEVICE_PREFERENCES_KEY, loadDevicePreferences } from "../state/preferences";
 import TablePage from "./TablePage";
 
 function splitSession(): SessionState {
@@ -71,10 +72,14 @@ function snapshot(): {
 }
 
 beforeEach(() => {
+  window.localStorage.removeItem(DEVICE_PREFERENCES_KEY);
   vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  window.localStorage.removeItem(DEVICE_PREFERENCES_KEY);
+  vi.unstubAllGlobals();
+});
 
 describe("Pro Mode workspace integration", () => {
   it("scopes the professional three-column presentation to Pro Mode", () => {
@@ -120,6 +125,29 @@ describe("Pro Mode workspace integration", () => {
     expect(screen.getByRole("img", { name: "Queen of hearts" })).toBeVisible();
     expect(screen.getByRole("img", { name: "10 value card" })).toBeVisible();
     expect(snapshot()).toEqual(before);
+  });
+
+  it("restores Pro ON and Normal OFF without adding chronology events", () => {
+    const initial = dealerSession();
+    const first = render(<Harness initial={initial} />);
+    fireEvent.click(screen.getByRole("switch", { name: "Pro Mode" }));
+    expect(loadDevicePreferences().workspaceMode).toBe("pro");
+    expect(snapshot().events).toEqual(initial.events);
+    first.unmount();
+
+    const second = render(<Harness initial={initial} />);
+    expect(document.querySelector(".table-page")).toHaveAttribute(
+      "data-workspace-mode", "pro",
+    );
+    fireEvent.click(screen.getByRole("switch", { name: "Pro Mode" }));
+    expect(loadDevicePreferences().workspaceMode).toBe("normal");
+    expect(snapshot().events).toEqual(initial.events);
+    second.unmount();
+
+    render(<Harness initial={initial} />);
+    expect(document.querySelector(".table-page")).toHaveAttribute(
+      "data-workspace-mode", "normal",
+    );
   });
 
   it("preserves split IDs and active target while assigning through DEAL_VALUE_CARD", () => {
@@ -221,6 +249,7 @@ describe("Pro Mode workspace integration", () => {
     fireEvent.click(screen.getByRole("button", { name: /Ten-valued card, 16 remaining/ }));
     const clicked = snapshot();
     clickRender.unmount();
+    window.localStorage.removeItem(DEVICE_PREFERENCES_KEY);
 
     render(<Harness initial={initial} />);
     fireEvent.click(screen.getByRole("button", { name: "Dealer" }));

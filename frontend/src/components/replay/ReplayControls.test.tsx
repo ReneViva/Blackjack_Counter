@@ -5,6 +5,11 @@ import { gameReducer, type SessionState } from "../../state/gameReducer";
 import { createInitialState, DEFAULT_CONFIGURATION } from "../../state/initialState";
 import { serializeSessionReplay } from "../../replay/sessionReplay";
 import { SESSION_STORAGE_KEY } from "../../state/persistence";
+import {
+  DEVICE_PREFERENCES_KEY,
+  loadDevicePreferences,
+  saveDevicePreferences,
+} from "../../state/preferences";
 import ReplayControls from "./ReplayControls";
 
 function startedSession(): SessionState {
@@ -33,6 +38,7 @@ function replayFile(state = startedSession()): File {
 
 afterEach(() => {
   window.localStorage.removeItem(SESSION_STORAGE_KEY);
+  window.localStorage.removeItem(DEVICE_PREFERENCES_KEY);
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -79,6 +85,27 @@ describe("ReplayControls", () => {
     await waitFor(() => expect(onActivate).toHaveBeenCalledOnce());
     expect(calls).toEqual(["validate", "activate"]);
     expect(onActivate).toHaveBeenCalledWith(startedSession());
+  });
+
+  it("activates imported deck configuration without changing the preferred default", async () => {
+    saveDevicePreferences({ workspaceMode: "pro", preferredDeckCount: 8 });
+    const fourDeck = gameReducer(createInitialState({
+      ...DEFAULT_CONFIGURATION,
+      rules: { ...DEFAULT_CONFIGURATION.rules, decks: 4 },
+    }), { type: "NEW_SHOE" });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(validationResponse()));
+    const onActivate = vi.fn();
+    render(<ReplayControls state={createInitialState()} onActivate={onActivate} />);
+
+    fireEvent.change(screen.getByLabelText("Import Replay (.json)"), {
+      target: { files: [replayFile(fourDeck)] },
+    });
+
+    await waitFor(() => expect(onActivate).toHaveBeenCalledWith(fourDeck));
+    expect(loadDevicePreferences()).toEqual({
+      workspaceMode: "pro",
+      preferredDeckCount: 8,
+    });
   });
 
   it("leaves the active session unchanged when backend validation fails", async () => {

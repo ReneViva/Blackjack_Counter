@@ -3,7 +3,6 @@ from enum import Enum
 from typing import Protocol
 
 from app.domain import (
-    Card,
     DealerCheckResult,
     DealerSoft17,
     HandStatus,
@@ -14,6 +13,8 @@ from app.domain import (
     RoundState,
     Rules,
     SurrenderRule,
+    is_known_exact_pair,
+    known_rank_for_observation,
 )
 
 from .hand_evaluator import HandValue, evaluate_hand
@@ -58,12 +59,7 @@ def split_action_decision(
             "Splitting is only allowed before another hand decision.",
         )
     cards = player.hand.cards
-    known_pair = (
-        len(cards) == 2
-        and all(isinstance(card, Card) for card in cards)
-        and cards[0].rank is cards[1].rank
-    )
-    if not known_pair:
+    if not is_known_exact_pair(cards):
         return _reject(
             "exact_pair_required",
             "Splitting requires two known cards of the same exact rank.",
@@ -73,9 +69,10 @@ def split_action_decision(
             "split_limit_reached",
             "The seat has reached its maximum number of split hands.",
         )
-    assert isinstance(cards[0], Card)
+    pair_rank = known_rank_for_observation(cards[0])
+    assert pair_rank is not None
     if (
-        cards[0].rank is Rank.ACE
+        pair_rank is Rank.ACE
         and player.split_depth > 0
         and not rules.resplit_aces
     ):

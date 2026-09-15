@@ -6,6 +6,12 @@ import App from "./App";
 import type { ResearchDefinition } from "./api/research";
 import { gameReducer, type SessionState } from "./state/gameReducer";
 import { createInitialState } from "./state/initialState";
+import { DEFAULT_CONFIGURATION } from "./state/initialState";
+import {
+  DEVICE_PREFERENCES_KEY,
+  loadDevicePreferences,
+  saveDevicePreferences,
+} from "./state/preferences";
 import {
   parsePersistedSession,
   serializePersistedSession,
@@ -119,6 +125,7 @@ function persistedSession(): SessionState {
 
 afterEach(() => {
   window.localStorage.removeItem(SESSION_STORAGE_KEY);
+  window.localStorage.removeItem(DEVICE_PREFERENCES_KEY);
   window.localStorage.removeItem("unrelated-key");
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -267,6 +274,46 @@ describe("application session persistence", () => {
         .toEqual(createInitialState());
     });
     expect(screen.getByRole("button", { name: "Add player at Seat 4" })).toBeVisible();
+  });
+
+  it("uses explicit 8- then 7-deck preferences for genuinely new sessions", async () => {
+    vi.stubGlobal("fetch", vi.fn(successfulApi));
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open table settings" }));
+    fireEvent.change(screen.getByLabelText("Deck count"), { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close table settings" }));
+    fireEvent.click(screen.getByRole("button", { name: /New Session/ }));
+    expect(loadDevicePreferences().preferredDeckCount).toBe(8);
+    expect(screen.getByText("8 decks")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open table settings" }));
+    fireEvent.change(screen.getByLabelText("Deck count"), { target: { value: "7" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close table settings" }));
+    fireEvent.click(screen.getByRole("button", { name: /New Session/ }));
+    expect(loadDevicePreferences().preferredDeckCount).toBe(7);
+    expect(screen.getByText("7 decks")).toBeVisible();
+  });
+
+  it("restores an active 7-deck session ahead of an 8-deck preference", () => {
+    saveDevicePreferences({ workspaceMode: "pro", preferredDeckCount: 8 });
+    const restored = gameReducer(createInitialState({
+      ...DEFAULT_CONFIGURATION,
+      rules: { ...DEFAULT_CONFIGURATION.rules, decks: 7 },
+    }), { type: "NEW_SHOE" });
+    window.localStorage.setItem(
+      SESSION_STORAGE_KEY,
+      serializePersistedSession(restored),
+    );
+    vi.stubGlobal("fetch", vi.fn(successfulApi));
+
+    render(<App />);
+
+    expect(screen.getByText("7 decks")).toBeVisible();
+    expect(document.querySelector(".table-page")).toHaveAttribute(
+      "data-workspace-mode", "pro",
+    );
+    expect(loadDevicePreferences().preferredDeckCount).toBe(8);
   });
 
   it("keeps the in-memory workspace usable when localStorage writes fail", async () => {

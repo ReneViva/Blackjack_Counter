@@ -6,6 +6,7 @@ from app.domain import (
     Hand,
     Rank,
     UnknownCard,
+    is_known_exact_pair,
     ValueOnlyCard,
     to_blackjack_value_class,
 )
@@ -78,11 +79,7 @@ def evaluate_hand(
     if soft:
         total += 10
 
-    pair = (
-        len(cards) == 2
-        and all(isinstance(card, Card) for card in cards)
-        and cards[0].rank is cards[1].rank
-    )
+    pair = is_known_exact_pair(cards)
     blackjack = (
         len(cards) == 2
         and total == 21

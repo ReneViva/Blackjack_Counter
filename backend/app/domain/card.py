@@ -96,6 +96,39 @@ def to_blackjack_value_class(rank: Rank) -> BlackjackValueClass:
     return _RANK_VALUE_CLASSES[rank]
 
 
+_UNAMBIGUOUS_VALUE_RANKS: dict[BlackjackValueClass, Rank] = {
+    BlackjackValueClass.ACE: Rank.ACE,
+    BlackjackValueClass.TWO: Rank.TWO,
+    BlackjackValueClass.THREE: Rank.THREE,
+    BlackjackValueClass.FOUR: Rank.FOUR,
+    BlackjackValueClass.FIVE: Rank.FIVE,
+    BlackjackValueClass.SIX: Rank.SIX,
+    BlackjackValueClass.SEVEN: Rank.SEVEN,
+    BlackjackValueClass.EIGHT: Rank.EIGHT,
+    BlackjackValueClass.NINE: Rank.NINE,
+}
+
+
+def known_rank_for_observation(card: ObservedCard) -> Rank | None:
+    """Return rank only when the observation determines one without guessing."""
+
+    if isinstance(card, Card):
+        return card.rank
+    if isinstance(card, ValueOnlyCard):
+        return _UNAMBIGUOUS_VALUE_RANKS.get(card.value)
+    if isinstance(card, UnknownCard):
+        return None
+    raise TypeError("card must be an observed card")
+
+
+def is_known_exact_pair(cards: tuple[ObservedCard, ...]) -> bool:
+    if len(cards) != 2:
+        return False
+    left = known_rank_for_observation(cards[0])
+    right = known_rank_for_observation(cards[1])
+    return left is not None and left is right
+
+
 ALL_CARDS: tuple[Card, ...] = tuple(
     Card(rank=rank, suit=suit) for rank in Rank for suit in Suit
 )

@@ -119,7 +119,7 @@ export type SessionAction =
       card: ValueOnlyCard;
     }>
   | Readonly<{ type: "UNDO" }>
-  | Readonly<{ type: "RESET" }>
+  | Readonly<{ type: "RESET"; configuration?: SessionConfiguration }>
   | Readonly<{ type: "ROUND_COMPLETE" }>
   | Readonly<{ type: "SHUFFLE" }>
   | Readonly<{
